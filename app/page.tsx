@@ -1,68 +1,26 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import Link from "next/link";
-
 export default function Home() {
-  const [balance, setBalance] = useState(100);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    // In production this would come from Discord OAuth / API
-    const saved = localStorage.getItem("betdice_balance");
-    if (saved) setBalance(parseFloat(saved));
-  }, []);
-
-  function saveBalance(b: number) {
-    setBalance(b);
-    localStorage.setItem("betdice_balance", b.toString());
-  }
-
   return (
-    <div className="container">
-      <header style={{ marginBottom: 24, textAlign: "center" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700 }}>🎲 Betdice</h1>
-        <p className="muted">Provably fair dice · Discord linked</p>
-      </header>
-
-      {/* Balance card - matches your Discord embed style */}
-      <div className="card" style={{ textAlign: "center" }}>
-        <div className="label">Your balance</div>
-        <div className="balance-value" style={{ margin: "8px 0 16px" }}>
-          🎲 {balance.toFixed(2)} dices
-        </div>
-
-        <div className="row" style={{ justifyContent: "center" }}>
-          <button
-            className="btn btn-secondary"
-            onClick={() => alert("Deposit: Connect Plisio API key in Vercel env to enable unique addresses")}
-          >
-            Deposit
-          </button>
-          <button
-            className="btn btn-secondary"
-            onClick={() => alert("Withdraw: Coming after Plisio setup")}
-          >
-            Withdraw
-          </button>
-        </div>
-      </div>
-
-      {/* Play button */}
-      <Link href="/play">
-        <button className="btn btn-primary" style={{ width: "100%", padding: 14, fontSize: 16 }}>
-          🎲 Play Dice
-        </button>
-      </Link>
-
-      <div className="card" style={{ marginTop: 24 }}>
-        <div className="label">How it works</div>
-        <p className="muted" style={{ lineHeight: 1.5, marginTop: 8 }}>
-          Every roll is provably fair. Server seed is hashed before you play.
-          After the roll you can verify the result yourself using the revealed
-          server seed, your client seed and the nonce.
+    <main style={{
+      minHeight: "100vh",
+      background: "#1e1f22",
+      color: "#dbdee1",
+      fontFamily: "system-ui, sans-serif",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+      textAlign: "center",
+    }}>
+      <div>
+        <h1 style={{ fontSize: 22, marginBottom: 8 }}>Betdice API</h1>
+        <p style={{ color: "#949ba4", fontSize: 14, maxWidth: 360 }}>
+          Provably fair seed generation &amp; Plisio webhooks for the Discord bot.
+          No games are hosted on this site.
+        </p>
+        <p style={{ color: "#949ba4", fontSize: 13, marginTop: 16 }}>
+          Endpoints: <code>/api/fair/seed</code> · <code>/api/fair/roll</code> · <code>/api/plisio/callback</code>
         </p>
       </div>
-    </div>
+    </main>
   );
 }

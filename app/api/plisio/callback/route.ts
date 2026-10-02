@@ -1,39 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * Plisio webhook endpoint
- * Set in Plisio dashboard as Status URL:
- * https://your-domain.vercel.app/api/plisio/callback?json=true
- *
- * For deposits (pay_in) Plisio sends:
- * - deposit_uid  (your user id)
- * - amount / source_amount
- * - status = completed
- * - verify_hash
+ * Plisio webhook – set Status URL in Plisio dashboard to:
+ * https://betdice.vercel.app/api/plisio/callback?json=true
  */
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get("content-type") || "";
-    let data: any;
+    let data: Record<string, any>;
 
     if (contentType.includes("application/json")) {
       data = await req.json();
     } else {
-      // form-data fallback
       const form = await req.formData();
       data = Object.fromEntries(form.entries());
     }
 
-    console.log("[Plisio callback]", data);
+    console.log("[Plisio callback]", JSON.stringify(data));
 
-    // TODO: verify verify_hash with your PLISIO_SECRET_KEY
-    // TODO: map deposit_uid → Discord user id and credit balance in DB
+    // TODO: verify data.verify_hash with PLISIO_SECRET_KEY
+    // TODO: credit Discord user (data.deposit_uid) in your real DB / notify the bot
 
-    if (data.status === "completed" && data.ipn_type === "pay_in") {
-      const uid = data.deposit_uid;
+    if (data.status === "completed" && (data.ipn_type === "pay_in" || data.ipn_type === "invoice")) {
+      const uid = data.deposit_uid || data.order_number;
       const amount = parseFloat(data.source_amount || data.amount || "0");
-      console.log(`Credit user ${uid} with ${amount}`);
-      // add_balance(uid, amount)  ← connect to your real DB here
+      console.log(`→ Credit user ${uid} with ${amount}`);
     }
 
     return NextResponse.json({ status: "ok" });
@@ -43,7 +34,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Plisio sometimes does GET for testing
 export async function GET() {
   return NextResponse.json({ status: "Plisio callback endpoint ready" });
 }

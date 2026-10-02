@@ -1,41 +1,86 @@
-# Betdice
+# Betdice API
 
-Provably fair dice games + crypto deposits (Plisio) for Discord community.
+Backend only — provably fair generation + Plisio webhooks for the Discord bot.
+**No games are hosted on this website.**
 
-## Features
+## Public URL
+https://betdice.vercel.app
 
-- **Provably Fair Dice** – Server seed + Client seed + Nonce. Verify every roll yourself.
-- **Balance system** – Deposit / Withdraw buttons
-- **Plisio ready** – Unique deposit addresses + webhook endpoint
-- Dark UI matching Discord style
+## API Endpoints
 
-## Quick Start (local)
+### 1. Get a new server seed (before a game)
+```
+GET /api/fair/seed
+```
+Returns:
+```json
+{
+  "roll_id": "...",
+  "server_seed_hash": "...",
+  "server_seed": "..."
+}
+```
+Show `server_seed_hash` to the user in Discord before they bet.
 
-```bash
-npm install
-npm run dev
+### 2. Roll (bot calls this to get the result)
+```
+POST /api/fair/roll
+Content-Type: application/json
+
+{
+  "server_seed": "...",
+  "client_seed": "user_seed_or_random",
+  "nonce": 0,
+  "target": 50,
+  "direction": "under"
+}
+```
+Returns the float 0–100 + win/lose if target/direction given.
+
+### 3. Verify a past roll (public)
+```
+POST /api/fair/verify
+{
+  "server_seed": "...",
+  "client_seed": "...",
+  "nonce": 0,
+  "claimed_result": 42.17
+}
 ```
 
-Open http://localhost:3000
-
-## Environment variables (Vercel / .env.local)
-
+### 4. Plisio deposit webhook
 ```
-PLISIO_SECRET_KEY=your_plisio_secret_key
-NEXT_PUBLIC_SITE_URL=https://your-domain.vercel.app
+POST /api/plisio/callback?json=true
 ```
+Set this URL in Plisio → API settings → Status URL.
 
-## Plisio Setup
+## Environment variables (Vercel)
 
-1. Get Secret Key from Plisio → API → API settings
-2. Set **Status URL** to:
-   `https://your-domain.vercel.app/api/plisio/callback?json=true`
-3. Use coin `USDT_TRX` (recommended) or others
+| Key | Value |
+|-----|-------|
+| `PLISIO_SECRET_KEY` | Your Plisio secret key (type: Secret) |
+| `NEXT_PUBLIC_SITE_URL` | `https://betdice.vercel.app` (type: Config is fine) |
 
-## Deploy to Vercel
+**Do NOT put the Plisio key in `NEXT_PUBLIC_SITE_URL`.**
 
-Already linked via GitHub. Just push to `main` and Vercel auto-deploys.
+## Discord bot usage example
 
-## Discord Bot Sync
+```python
+import aiohttp
 
-Balances are stored per Discord user ID. Connect Discord OAuth later or keep the bot writing to the same database.
+async def get_fair_roll(client_seed: str, nonce: int, target: float, direction: str):
+    async with aiohttp.ClientSession() as session:
+        # 1. get seed
+        async with session.get("https://betdice.vercel.app/api/fair/seed") as r:
+            seed_data = await r.json()
+
+        # 2. roll
+        async with session.post("https://betdice.vercel.app/api/fair/roll", json={
+            "server_seed": seed_data["server_seed"],
+            "client_seed": client_seed,
+            "nonce": nonce,
+            "target": target,
+            "direction": direction,
+        }) as r:
+            return await r.json()
+```
