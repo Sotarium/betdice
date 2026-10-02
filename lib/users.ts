@@ -1,51 +1,56 @@
 /**
- * Demo user store. Replace with real DB later.
- * Each user has deposits, withdrawals, plays and a profit history.
+ * Real user store only — no demo data.
+ * The Discord bot should POST to /api/users/sync to register activity.
  */
 
 export interface Tx {
   type: "Deposit" | "Withdraw" | "Play";
-  date: string; // ISO or display string
-  amount: number; // positive for deposit/win, negative for withdraw/loss
+  date: string;
+  amount: number;
+  label?: string;
 }
 
 export interface UserStats {
+  discordId: string;
   username: string;
-  avatar?: string;
+  avatar: string | null; // Discord avatar hash
   balance: number;
   profit: number;
   txs: Tx[];
-  /** profit over time points for the chart [timestamp, profit] */
   chart: { t: string; v: number }[];
 }
 
-// Seed with one example user matching your screenshot style
-const store: Record<string, UserStats> = {
-  username: {
-    username: "username",
-    balance: 1.39,
-    profit: 1.39,
-    txs: [
-      { type: "Deposit", date: "2026/09/28 5:00 PM", amount: 0.17 },
-    ],
-    chart: [
-      { t: "5:00 PM", v: 0.17 },
-      { t: "", v: 0.4 },
-      { t: "", v: 0.7 },
-      { t: "", v: 1.0 },
-      { t: "", v: 1.39 },
-    ],
-  },
-};
+// In-memory (replace with DB later). Starts EMPTY — only real users.
+const store: Record<string, UserStats> = {};
 
 export function getAllUsers(): UserStats[] {
-  return Object.values(store);
+  return Object.values(store).filter(
+    (u) => u.txs.length > 0 || u.balance !== 0 || u.profit !== 0
+  );
 }
 
-export function getUser(username: string): UserStats | null {
-  return store[username.toLowerCase()] || null;
+export function getUserByUsername(username: string): UserStats | null {
+  const key = username.toLowerCase();
+  return (
+    Object.values(store).find((u) => u.username.toLowerCase() === key) || null
+  );
+}
+
+export function getUserByDiscordId(id: string): UserStats | null {
+  return store[id] || null;
 }
 
 export function upsertUser(data: UserStats) {
-  store[data.username.toLowerCase()] = data;
+  store[data.discordId] = data;
+}
+
+/** Discord CDN avatar URL */
+export function avatarUrl(discordId: string, avatarHash: string | null, size = 128): string {
+  if (avatarHash) {
+    const ext = avatarHash.startsWith("a_") ? "gif" : "png";
+    return `https://cdn.discordapp.com/avatars/${discordId}/${avatarHash}.${ext}?size=${size}`;
+  }
+  // Default Discord avatar based on user id
+  const idx = Number(BigInt(discordId) % 6n);
+  return `https://cdn.discordapp.com/embed/avatars/${idx}.png`;
 }
