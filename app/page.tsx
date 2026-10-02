@@ -37,13 +37,13 @@ export default function Home() {
             className="btn btn-secondary"
             onClick={() => alert("Deposit: Connect Plisio API key in Vercel env to enable unique addresses")}
           >
-            ⬇️ Deposit
+            Deposit
           </button>
           <button
             className="btn btn-secondary"
             onClick={() => alert("Withdraw: Coming after Plisio setup")}
           >
-            ⬆️ Withdraw
+            Withdraw
           </button>
         </div>
       </div>
