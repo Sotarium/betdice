@@ -185,26 +185,44 @@ def add_balance(uid: int, amount: float):
 
 class DepositModal(discord.ui.Modal, title="Deposit"):
     amount = discord.ui.TextInput(
-        label="Amount (USD)",
-        placeholder="e.g. 10",
-        required=True,
-        min_length=1,
+        label="Amount (USD) — optional note",
+        placeholder="e.g. 10 (any amount can be sent to the address)",
+        required=False,
+        min_length=0,
         max_length=10,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        try:
-            amt = float(self.amount.value.replace(",", "."))
-            if amt <= 0:
-                raise ValueError
-        except ValueError:
-            await interaction.response.send_message("Invalid amount.", ephemeral=True)
-            return
+        await interaction.response.defer(ephemeral=True)
 
         import aiohttp
         avatar_hash = interaction.user.avatar.key if interaction.user.avatar else None
+
         try:
             async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{SITE_URL}/api/plisio/deposit",
+                    json={
+                        "discordId": str(interaction.user.id),
+                        "currency": "USDT_TRX",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as r:
+                    data = await r.json()
+
+                if r.status != 200 or not data.get("address"):
+                    err = data.get("error", "Unknown error")
+                    await interaction.followup.send(
+                        f"Could not get deposit address.\n`{err}`\n\n"
+                        "Make sure **PLISIO_SECRET_KEY** is set on Vercel.",
+                        ephemeral=True,
+                    )
+                    return
+
+                address = data["address"]
+                currency = data.get("currency", "USDT_TRX")
+
+                # Register user on site
                 await session.post(
                     f"{SITE_URL}/api/users/sync",
                     json={
@@ -212,25 +230,33 @@ class DepositModal(discord.ui.Modal, title="Deposit"):
                         "username": interaction.user.name,
                         "avatar": avatar_hash,
                         "type": "Deposit",
-                        "amount": amt,
+                        "amount": 0,
                         "balance": get_user(interaction.user.id)[0],
                         "profit": 0,
+                        "label": "address_issued",
                     },
                     timeout=aiohttp.ClientTimeout(total=10),
                 )
         except Exception as e:
-            print(f"Site sync error: {e}")
+            print(f"Deposit error: {e}")
+            await interaction.followup.send(
+                f"Network error getting address: `{e}`",
+                ephemeral=True,
+            )
+            return
 
         embed = discord.Embed(
-            title="Deposit",
+            title="Deposit USDT (TRC20)",
             description=(
-                f"**Amount:** ${amt:.2f}\n\n"
-                "Plisio unique address not connected yet.\n"
-                "Add PLISIO_SECRET_KEY on Vercel and tell me your coin (e.g. USDT_TRX)."
+                f"Send **USDT on Tron (TRC20)** to this address:\n\n"
+                f"```{address}```\n"
+                f"**Network:** Tron (TRC20) only — wrong network = lost funds\n\n"
+                f"Your balance updates automatically after Plisio confirms the payment."
             ),
             color=0x2B2D31,
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed.set_footer(text=f"Currency: {currency} · Unique address for your account")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class WithdrawModal(discord.ui.Modal, title="Withdraw"):
@@ -242,8 +268,8 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
         max_length=12,
     )
     address = discord.ui.TextInput(
-        label="Your crypto address",
-        placeholder="Paste your wallet address",
+        label="Your USDT TRC20 address",
+        placeholder="Paste your Tron USDT address",
         required=True,
         min_length=10,
         max_length=128,
@@ -293,7 +319,7 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             description=(
                 f"**Amount:** {amt:,.2f} dices\n"
                 f"**Address:** `{self.address.value}`\n\n"
-                "Balance deducted. Crypto payout after Plisio withdraw is connected."
+                "Balance deducted. Manual/Plisio payout will be processed."
             ),
             color=0x2B2D31,
         )
