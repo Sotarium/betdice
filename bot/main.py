@@ -492,6 +492,54 @@ async def daily(interaction: discord.Interaction):
     )
 
 
+@bot.tree.command(name="credit", description="[Admin] Manually credit a user's dice balance")
+@app_commands.describe(
+    user="The Discord user to credit",
+    amount="Amount of dices to add",
+    user_id="Optional: Enter Discord User ID directly if user is not in server"
+)
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+async def credit(
+    interaction: discord.Interaction,
+    amount: float,
+    user: discord.Member = None,
+    user_id: str = None,
+):
+    target_id = None
+    target_name = "User"
+    if user:
+        target_id = user.id
+        target_name = user.display_name
+    elif user_id:
+        try:
+            target_id = int(user_id.strip())
+            target_name = f"<@{target_id}>"
+        except ValueError:
+            await interaction.response.send_message("Invalid user_id.", ephemeral=True)
+            return
+    else:
+        await interaction.response.send_message("Please provide either a user mention or a user_id.", ephemeral=True)
+        return
+
+    if amount <= 0:
+        await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
+        return
+
+    add_balance(target_id, amount)
+    new_bal, _ = get_user(target_id)
+
+    asyncio.create_task(notify_user_deposit(target_id, amount, new_bal))
+    asyncio.create_task(sync_website_deposit(target_id, amount, new_bal))
+
+    embed = discord.Embed(
+        title="Admin Credit Added 🎲",
+        description=f"Credited **+{amount:,.2f}** dices to **{target_name}** (`{target_id}`).\nNew Balance: **{new_bal:,.2f}** dices.",
+        color=0x2B2D31,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 async def run_bot_and_server():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
