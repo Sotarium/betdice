@@ -725,7 +725,7 @@ class MinesView(discord.ui.View):
             # Hit a bomb
             self.game_over = True
             button.style = discord.ButtonStyle.danger
-            button.label = "X"
+            button.label = "\u200b"
 
             # Reveal rest of board
             for item in self.children:
@@ -733,10 +733,10 @@ class MinesView(discord.ui.View):
                     item.disabled = True
                     if item.index in self.bomb_positions and item.index != idx:
                         item.style = discord.ButtonStyle.danger
-                        item.label = "X"
+                        item.label = "\u200b"
                     elif item.index in self.revealed_indices:
                         item.style = discord.ButtonStyle.success
-                        item.label = "O"
+                        item.label = "\u200b"
                 elif item == self.cashout_btn:
                     item.disabled = True
 
@@ -750,7 +750,7 @@ class MinesView(discord.ui.View):
         # Safe tile found
         self.revealed_indices.add(idx)
         button.style = discord.ButtonStyle.success
-        button.label = "O"
+        button.label = "\u200b"
         button.disabled = True
 
         revealed_count = len(self.revealed_indices)
@@ -764,7 +764,8 @@ class MinesView(discord.ui.View):
                 if isinstance(item, MinesButton):
                     item.disabled = True
                     if item.index in self.bomb_positions:
-                        item.label = "X"
+                        item.style = discord.ButtonStyle.danger
+                        item.label = "\u200b"
                 elif item == self.cashout_btn:
                     item.disabled = True
 
@@ -797,8 +798,8 @@ class MinesView(discord.ui.View):
             if isinstance(item, MinesButton):
                 item.disabled = True
                 if item.index in self.bomb_positions:
-                    item.label = "X"
                     item.style = discord.ButtonStyle.danger
+                    item.label = "\u200b"
             elif item == self.cashout_btn:
                 item.disabled = True
 
