@@ -347,25 +347,6 @@ async def get_deposit_address(discord_id: int, username: str, avatar_hash):
             except Exception:
                 data = {"error": text[:300]}
 
-        if status == 200 and (data.get("addresses") or data.get("address")):
-            try:
-                await session.post(
-                    f"{SITE_URL}/api/users/sync",
-                    json={
-                        "discordId": str(discord_id),
-                        "username": username,
-                        "avatar": avatar_hash,
-                        "type": "Deposit",
-                        "amount": 0,
-                        "balance": get_user(discord_id)[0],
-                        "profit": 0,
-                        "label": "address_issued",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=10),
-                )
-            except Exception:
-                pass
-
         return status, data
 
 
