@@ -613,9 +613,9 @@ def get_mines_multiplier(total_tiles: int, bombs: int, revealed: int) -> float:
     safe_tiles = total_tiles - bombs
     if safe_tiles <= 0:
         return 1.0
-    # Standard probability-based multiplier with 2% house edge
+    # Standard probability-based multiplier with 5% house edge
     prob = math.comb(safe_tiles, revealed) / math.comb(total_tiles, revealed)
-    mult = 0.98 / prob
+    mult = 0.95 / prob
     return round(mult, 2)
 
 
