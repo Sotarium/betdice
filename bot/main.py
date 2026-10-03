@@ -157,8 +157,27 @@ try:
 except sqlite3.OperationalError:
     pass
 
+db.execute(
+    "CREATE TABLE IF NOT EXISTS transactions ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, amount REAL, balance_after REAL, ts REAL)"
+)
+db.commit()
+
+
+def log_tx(uid: int, tx_type: str, amount: float):
+    """Record a transaction for profit tracking."""
+    row = db.execute("SELECT balance, promo_balance FROM users WHERE id=?", (uid,)).fetchone()
+    bal_after = (row[0] or 0.0) + (row[1] or 0.0) if row else 0.0
+    db.execute(
+        "INSERT INTO transactions (user_id, type, amount, balance_after, ts) VALUES (?, ?, ?, ?, ?)",
+        (uid, tx_type, amount, bal_after, time.time()),
+    )
+    db.commit()
+
+
 DAILY_AMOUNT = 100.0
 DAILY_COOLDOWN = 24 * 60 * 60
+
 
 
 def get_user(uid: int):
@@ -206,6 +225,7 @@ def add_balance(uid: int, amount: float, is_promo: bool = False, add_wager: floa
         # Standard positive clean balance (deposit or game winnings)
         db.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
     db.commit()
+    log_tx(uid, "bet" if amount < 0 else ("promo" if is_promo else "balance"), amount)
 
 
 def get_withdrawable_balance(uid: int) -> float:
@@ -279,7 +299,13 @@ async def handle_deposit_credit(request: web.Request):
             return web.json_response({"error": "invalid amount"}, status=400)
 
         add_balance(discord_id, amount)
-        new_balance, _ = get_user(discord_id)
+        # Override the auto-logged type to 'deposit' for accurate history
+        db.execute(
+            "UPDATE transactions SET type='deposit' WHERE user_id=? AND type='balance' ORDER BY id DESC LIMIT 1",
+            (discord_id,)
+        )
+        db.commit()
+        new_balance, _, _, _ = get_user(discord_id)
         print(f"[Deposit Webhook] Credited user {discord_id} with {amount}. New Balance: {new_balance}")
 
         asyncio.create_task(notify_user_deposit(discord_id, amount, new_balance))
@@ -906,12 +932,18 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
 
     # Add as real clean balance — fully withdrawable and tippable
     add_balance(user.id, amount)
+    # Tag as deposit so it appears in profit history
+    db.execute(
+        "UPDATE transactions SET type='deposit' WHERE user_id=? AND type='balance' ORDER BY id DESC LIMIT 1",
+        (user.id,)
+    )
+    db.commit()
 
     new_bal, _, _, _ = get_user(user.id)
 
     try:
         embed = discord.Embed(
-            title=f"\"User\" Tipped You {amount:,.2f}!",
+            title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
             description=f"Your new balance: **{new_bal:,.2f}** dices",
             color=0x2B2D31,
         )
@@ -961,6 +993,189 @@ async def remove_cmd(interaction: discord.Interaction, user: discord.Member, amo
         color=0xFF0000,
     )
     await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
+
+
+async def generate_profit_card(target: discord.Member) -> io.BytesIO:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    from matplotlib.patches import FancyBboxPatch
+    import matplotlib.patheffects as pe
+    import numpy as np
+    import aiohttp
+    from PIL import Image as PILImage, ImageDraw, ImageFont, ImageFilter
+
+    uid = target.id
+
+    # --- Fetch transaction history ---
+    rows = db.execute(
+        "SELECT type, amount, balance_after, ts FROM transactions WHERE user_id=? ORDER BY ts ASC",
+        (uid,),
+    ).fetchall()
+
+    # --- Fetch deposits from transactions (type='deposit') ---
+    deposit_rows = db.execute(
+        "SELECT amount, ts FROM transactions WHERE user_id=? AND type='deposit' ORDER BY ts DESC LIMIT 10",
+        (uid,),
+    ).fetchall()
+
+    # --- Current balance ---
+    bal, _, promo, _ = get_user(uid)
+    current_total = bal + promo
+
+    # --- Build profit line data ---
+    # profit = balance_after - first balance_after (so starts at 0)
+    if rows:
+        times = [r[3] for r in rows]
+        balances = [r[2] for r in rows]
+        # Normalize to profit relative to start
+        start = balances[0]
+        profits = [b - start for b in balances]
+        # Add current point
+        times.append(time.time())
+        profits.append(current_total - start)
+    else:
+        times = [time.time() - 3600, time.time()]
+        profits = [0.0, 0.0]
+
+    profit_now = profits[-1]
+    is_positive = profit_now >= 0
+    line_color = "#00e676" if is_positive else "#ff1744"
+    fill_color = "#00e676" if is_positive else "#ff1744"
+    profit_sign = "+" if is_positive else ""
+
+    # --- Download avatar ---
+    avatar_img = None
+    try:
+        avatar_url = str(target.display_avatar.replace(size=128, format="png"))
+        async with aiohttp.ClientSession() as session:
+            async with session.get(avatar_url) as resp:
+                avatar_data = await resp.read()
+        avatar_img = PILImage.open(io.BytesIO(avatar_data)).convert("RGBA").resize((80, 80))
+        # Circular mask
+        mask = PILImage.new("L", (80, 80), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, 80, 80), fill=255)
+        avatar_img.putalpha(mask)
+    except Exception:
+        avatar_img = None
+
+    # --- Build the card with PIL ---
+    W, H = 900, 480
+    card = PILImage.new("RGBA", (W, H), (13, 14, 20, 255))
+    draw = ImageDraw.Draw(card)
+
+    # Panel backgrounds
+    # Left panel (chart area)
+    draw.rounded_rectangle([20, 20, 560, H - 20], radius=16, fill=(20, 22, 30, 255))
+    # Right panel (history)
+    draw.rounded_rectangle([580, 20, W - 20, H - 20], radius=16, fill=(20, 22, 30, 255))
+
+    # Avatar
+    if avatar_img:
+        card.paste(avatar_img, (36, 36), avatar_img)
+    else:
+        draw.ellipse([36, 36, 116, 116], fill=(40, 42, 55, 255))
+
+    # Username text
+    try:
+        font_big = ImageFont.truetype("arial.ttf", 22)
+        font_med = ImageFont.truetype("arial.ttf", 14)
+        font_sm  = ImageFont.truetype("arial.ttf", 12)
+        font_xs  = ImageFont.truetype("arial.ttf", 11)
+    except Exception:
+        font_big = ImageFont.load_default()
+        font_med = font_big
+        font_sm  = font_big
+        font_xs  = font_big
+
+    draw.text((128, 46), target.display_name, font=font_big, fill=(230, 230, 230, 255))
+    draw.text((128, 74), f"@{target.name}", font=font_med, fill=(110, 115, 135, 255))
+
+    # Big profit number
+    draw.text((36, 128), f"{profit_sign}{profit_now:,.2f}", font=font_big, fill=(230, 230, 230, 255))
+    profit_color_rgb = (0, 230, 118, 255) if is_positive else (255, 23, 68, 255)
+    draw.text((36, 158), f"{profit_sign}{profit_now:,.2f}", font=font_sm, fill=profit_color_rgb)
+
+    # --- Draw chart using matplotlib, render to PIL ---
+    fig, ax = plt.subplots(figsize=(5.0, 2.2), dpi=100)
+    fig.patch.set_facecolor("#14161E")
+    ax.set_facecolor("#14161E")
+
+    xs = list(range(len(profits)))
+    ys = profits
+
+    ax.plot(xs, ys, color=line_color, linewidth=2.0, solid_capstyle="round")
+    ax.fill_between(xs, ys, min(ys) - abs(max(ys) - min(ys)) * 0.1,
+                    color=fill_color, alpha=0.18)
+
+    # Dot at last point
+    ax.scatter([xs[-1]], [ys[-1]], color=line_color, s=50, zorder=5)
+
+    ax.set_xlim(0, max(1, len(xs) - 1))
+    ax.axis("off")
+    fig.tight_layout(pad=0.2)
+
+    chart_buf = io.BytesIO()
+    fig.savefig(chart_buf, format="png", dpi=100, bbox_inches="tight",
+                facecolor="#14161E", transparent=False)
+    plt.close(fig)
+    chart_buf.seek(0)
+    chart_pil = PILImage.open(chart_buf).convert("RGBA")
+    chart_pil = chart_pil.resize((500, 200))
+    card.paste(chart_pil, (30, 185), chart_pil)
+
+    # Profits badge
+    draw.rounded_rectangle([36, H - 80, 200, H - 40], radius=20, fill=(30, 33, 45, 255))
+    draw.text((56, H - 68), "Profits", font=font_xs, fill=(110, 115, 135, 255))
+    draw.text((56, H - 52), f"{profit_sign}{profit_now:,.2f}", font=font_sm, fill=profit_color_rgb)
+
+    # --- Right panel: deposit history ---
+    rx = 596
+    draw.text((rx, 36), "TYPE", font=font_xs, fill=(90, 95, 115, 255))
+    draw.text((rx + 140, 36), "DATE", font=font_xs, fill=(90, 95, 115, 255))
+    draw.text((rx + 240, 36), "AMOUNT", font=font_xs, fill=(90, 95, 115, 255))
+
+    # Divider
+    draw.line([(rx, 56), (W - 36, 56)], fill=(35, 38, 52, 255), width=1)
+
+    if deposit_rows:
+        for i, (dep_amt, dep_ts) in enumerate(deposit_rows[:6]):
+            y = 66 + i * 44
+            if y + 36 > H - 30:
+                break
+            row_bg = (24, 27, 38, 255) if i % 2 == 0 else (20, 22, 30, 255)
+            draw.rounded_rectangle([rx - 8, y, W - 28, y + 36], radius=8, fill=row_bg)
+            # Icon circle
+            draw.ellipse([rx, y + 8, rx + 20, y + 28], fill=(30, 180, 80, 60))
+            draw.text((rx + 4, y + 10), "↓", font=font_sm, fill=(0, 210, 90, 255))
+            draw.text((rx + 28, y + 12), "Deposit", font=font_sm, fill=(200, 205, 220, 255))
+            import datetime
+            dt = datetime.datetime.fromtimestamp(dep_ts)
+            draw.text((rx + 140, y + 6), dt.strftime("%Y/%m/%d"), font=font_xs, fill=(140, 145, 165, 255))
+            draw.text((rx + 140, y + 20), dt.strftime("%I:%M %p"), font=font_xs, fill=(100, 105, 125, 255))
+            draw.text((rx + 250, y + 12), f"{dep_amt:+,.2f}", font=font_sm,
+                      fill=(0, 210, 90, 255) if dep_amt >= 0 else (255, 60, 60, 255))
+    else:
+        draw.text((rx, 80), "No deposits yet.", font=font_sm, fill=(100, 105, 125, 255))
+
+    buf = io.BytesIO()
+    card.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+@bot.tree.command(name="profit", description="Show a user's profit card with chart and history")
+@app_commands.describe(user="The user to check profit for")
+async def profit_cmd(interaction: discord.Interaction, user: discord.Member):
+    await interaction.response.defer()
+    try:
+        buf = await generate_profit_card(user)
+        file = discord.File(buf, filename="profit.png")
+        await interaction.followup.send(file=file)
+    except Exception as e:
+        await interaction.followup.send(f"Failed to generate profit card: {e}", ephemeral=True)
+        raise
 
 
 async def run_bot_and_server():
