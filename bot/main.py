@@ -639,23 +639,22 @@ class MinesView(discord.ui.View):
         self.bet_amount = bet_amount
         self.bombs = bombs
         self.grid_size = 5
-        # In Discord, a view has max 25 items across 5 rows (5 buttons per row).
-        # We use 24 tiles (indices 0..23) + 1 Cashout button at the 25th slot (row 4, pos 4).
-        self.total_tiles = 24
+        # 4 rows × 5 tiles = 20 tiles, row 4 reserved for cashout button alone
+        self.total_tiles = 20
         self.safe_tiles = self.total_tiles - bombs
         self.revealed_indices = set()
         self.game_over = False
 
-        # Random bomb placement among the 24 tiles
+        # Random bomb placement among the 20 tiles
         self.bomb_positions = set(random.sample(range(self.total_tiles), self.bombs))
 
-        # Build 24 tile buttons (row 0 to 4)
+        # Build 20 tile buttons across rows 0-3
         for i in range(self.total_tiles):
-            row = i // 5
+            row = i // 5  # rows 0, 1, 2, 3
             btn = MinesButton(index=i, row=row)
             self.add_item(btn)
 
-        # Cashout button placed at the 25th slot (row 4)
+        # Cashout button on its own row 4 (below the grid)
         self.cashout_btn = discord.ui.Button(
             label="Cashout (0.00)",
             style=discord.ButtonStyle.success,
@@ -679,45 +678,38 @@ class MinesView(discord.ui.View):
             embed = discord.Embed(
                 title="Mines",
                 description=(
-                    f"**Bet:** `{self.bet_amount:,.2f}` dices\n"
-                    f"**Grid:** `5x5` · **Bombs:** `{self.bombs}`\n"
-                    f"**Safe Tiles Found:** `{revealed_count}/{self.safe_tiles}`\n"
-                    f"**Multiplier:** `{self.current_multiplier:.2f}x`\n"
-                    f"**Current Payout:** `+{self.current_payout:,.2f}` dices"
+                    f"**Bet:** {self.bet_amount:,.2f} dices\n"
+                    f"**Multiplier:** {self.current_multiplier:.2f}x\n"
+                    f"**Payout:** +{self.current_payout:,.2f} dices"
                 ),
                 color=0x2B2D31,
             )
-            embed.set_footer(text="Click a tile to pick or click Cashout anytime.")
         elif status == "win":
             embed = discord.Embed(
                 title="Cashed Out",
                 description=(
-                    f"You cashed out at **{self.current_multiplier:.2f}x**\n"
-                    f"**Profit:** `+{cashout_amt - self.bet_amount:,.2f}` dices\n"
-                    f"**Total Payout:** `+{cashout_amt:,.2f}` dices"
+                    f"**{self.current_multiplier:.2f}x** — +{cashout_amt:,.2f} dices"
                 ),
                 color=0x57F287,
             )
         elif status == "all_cleared":
             embed = discord.Embed(
-                title="All Safe Tiles Cleared",
+                title="Board Cleared",
                 description=(
-                    f"You cleared all safe tiles!\n"
-                    f"**Multiplier:** `{self.current_multiplier:.2f}x`\n"
-                    f"**Total Payout:** `+{cashout_amt:,.2f}` dices"
+                    f"**{self.current_multiplier:.2f}x** — +{cashout_amt:,.2f} dices"
                 ),
                 color=0xFEE75C,
             )
-        else: # lost
+        else:  # lost
             embed = discord.Embed(
                 title="Bomb Hit",
                 description=(
-                    f"You lost **{self.bet_amount:,.2f}` dices.\n"
-                    f"Tiles cleared: `{revealed_count}`"
+                    f"Lost **{self.bet_amount:,.2f}** dices · {revealed_count} tiles cleared"
                 ),
                 color=0xED4245,
             )
         return embed
+
 
     async def handle_tile_click(self, interaction: discord.Interaction, button: MinesButton):
         if self.game_over:
@@ -825,7 +817,7 @@ async def mines(
     amount: float,
     bombs: int,
 ):
-    total_tiles = 24
+    total_tiles = 20
 
     if amount <= 0:
         await interaction.response.send_message("Bet amount must be greater than 0.", ephemeral=True)
