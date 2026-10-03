@@ -198,7 +198,7 @@ async def notify_user_deposit(discord_id: int, amount: float, new_balance: float
         user = await bot.fetch_user(discord_id)
         if user:
             embed = discord.Embed(
-                title="Deposit Credited! 🎲",
+                title="Deposit Credited!",
                 description=(
                     f"Your deposit of **+{amount:,.2f}** has been confirmed!\n"
                     f"Your new balance is **{new_balance:,.2f}** dices."
@@ -810,6 +810,62 @@ async def mines(
     )
     embed = view.get_game_embed(status="active")
     await interaction.response.send_message(embed=embed, view=view)
+
+
+ALLOWED_TIPPER_ID = 1079074717799030824
+
+
+@bot.tree.command(name="tip", description="Tip dices to another user")
+@app_commands.describe(
+    user="The user to tip",
+    amount="Amount of dices to tip"
+)
+async def tip(interaction: discord.Interaction, user: discord.Member, amount: float):
+    if interaction.user.id != ALLOWED_TIPPER_ID:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    if user.id == interaction.user.id:
+        await interaction.response.send_message("You cannot tip yourself.", ephemeral=True)
+        return
+
+    if amount <= 0:
+        await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
+        return
+
+    sender_bal, _ = get_user(interaction.user.id)
+    if amount > sender_bal:
+        await interaction.response.send_message(
+            f"Not enough balance. You have **{sender_bal:,.2f}** dices.",
+            ephemeral=True,
+        )
+        return
+
+    # Deduct from tipper and add to recipient
+    add_balance(interaction.user.id, -amount)
+    add_balance(user.id, amount)
+
+    sender_new, _ = get_user(interaction.user.id)
+    recipient_new, _ = get_user(user.id)
+
+    # Send DM to the recipient: "User" Tipped You X! \n Your new balance: Y
+    try:
+        embed = discord.Embed(
+            title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
+            description=f"Your new balance: **{recipient_new:,.2f}** dices",
+            color=0x2B2D31,
+        )
+        await user.send(embed=embed)
+    except Exception as e:
+        print(f"[Tip DM Error] Could not DM user {user.id}: {e}")
+
+    # Confirm in channel
+    confirm_embed = discord.Embed(
+        title="Tip Sent!",
+        description=f"Successfully tipped **{amount:,.2f}** dices to {user.mention}.\nYour remaining balance: **{sender_new:,.2f}** dices.",
+        color=0x2B2D31,
+    )
+    await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
 
 async def run_bot_and_server():
