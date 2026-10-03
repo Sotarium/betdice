@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { getUserByUsername, avatarUrl } from "@/lib/users";
 import ProfileClient from "./ProfileClient";
 
 export default function UserProfilePage({
@@ -12,10 +11,5 @@ export default function UserProfilePage({
     notFound();
   }
 
-  const user = getUserByUsername(params.username);
-  if (!user) notFound();
-
-  const avatar = avatarUrl(user.discordId, user.avatar, 256);
-
-  return <ProfileClient user={user} avatar={avatar} />;
+  return <ProfileClient username={params.username} />;
 }
