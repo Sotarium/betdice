@@ -67,7 +67,10 @@ export async function POST(req: NextRequest) {
     // Single object or array
     const items = Array.isArray(data.data) ? data.data : [data.data];
 
-    // Fetch min deposit amounts from Plisio for the requested currencies
+    // Known Plisio minimums (USD) — fallback if API fetch fails
+    const KNOWN_MINIMUMS: Record<string, number> = { SOL: 1, LTC: 1 };
+
+    // Try to fetch live min deposit amounts from Plisio
     let minSums: Record<string, number> = {};
     try {
       const currencies = requested.split(",");
@@ -81,19 +84,22 @@ export async function POST(req: NextRequest) {
         if (result.status === "fulfilled" && result.value?.data) {
           const cid = currencies[i];
           const d = result.value.data;
-          // min_sum_in is in USD; also check min_sum for the crypto amount
-          minSums[cid] = parseFloat(d.min_sum_in || d.min_sum || "0");
+          const fetched = parseFloat(d.min_sum_in || d.min_sum || "0");
+          minSums[cid] = fetched > 0 ? fetched : (KNOWN_MINIMUMS[cid] ?? 1);
         }
       });
     } catch (_) {
-      // Non-fatal: min sums just won't be shown
+      // Non-fatal: fall back to known minimums
     }
 
-    const addresses = items.map((d: Record<string, string>) => ({
-      address: d.hash || d.wallet_hash || d.address || d.wallet,
-      currency: d.psys_cid || d.currency,
-      min_sum: minSums[d.psys_cid || d.currency] ?? 0,
-    }));
+    const addresses = items.map((d: Record<string, string>) => {
+      const cid = (d.psys_cid || d.currency || "").toUpperCase();
+      return {
+        address: d.hash || d.wallet_hash || d.address || d.wallet,
+        currency: cid,
+        min_sum: minSums[cid] ?? KNOWN_MINIMUMS[cid] ?? 1,
+      };
+    });
 
     // Keep backward-compatible single fields (first address)
     const first = addresses[0] || {};
