@@ -29,10 +29,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "discordId required" }, { status: 400 });
     }
 
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      (process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : "https://betdice-frouxzys-projects-fcc3f71b.vercel.app");
+
     const params = new URLSearchParams({
       api_key: apiKey,
       psys_cid: requested,
       uid: discordId,
+      callback_url: `${siteUrl}/api/plisio/callback?json=true`,
     });
 
     const res = await fetch(
@@ -60,9 +67,32 @@ export async function POST(req: NextRequest) {
     // Single object or array
     const items = Array.isArray(data.data) ? data.data : [data.data];
 
+    // Fetch min deposit amounts from Plisio for the requested currencies
+    let minSums: Record<string, number> = {};
+    try {
+      const currencies = requested.split(",");
+      const minFetches = currencies.map((cid) =>
+        fetch(
+          `https://plisio.net/api/v1/currencies/USD?api_key=${apiKey}&psys_cid=${cid}`
+        ).then((r) => r.json())
+      );
+      const minResults = await Promise.allSettled(minFetches);
+      minResults.forEach((result, i) => {
+        if (result.status === "fulfilled" && result.value?.data) {
+          const cid = currencies[i];
+          const d = result.value.data;
+          // min_sum_in is in USD; also check min_sum for the crypto amount
+          minSums[cid] = parseFloat(d.min_sum_in || d.min_sum || "0");
+        }
+      });
+    } catch (_) {
+      // Non-fatal: min sums just won't be shown
+    }
+
     const addresses = items.map((d: Record<string, string>) => ({
       address: d.hash || d.wallet_hash || d.address || d.wallet,
       currency: d.psys_cid || d.currency,
+      min_sum: minSums[d.psys_cid || d.currency] ?? 0,
     }));
 
     // Keep backward-compatible single fields (first address)

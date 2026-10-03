@@ -505,25 +505,28 @@ class BalanceView(discord.ui.View):
             return
 
         if not addresses and data.get("address"):
-            addresses = [{"address": data["address"], "currency": data.get("currency", "?")}]
+            addresses = [{"address": data["address"], "currency": data.get("currency", "?"), "min_sum": 0}]
 
         lines = []
         for a in addresses:
             cur = (a.get("currency") or "?").upper()
             addr = a.get("address") or "?"
+            min_s = a.get("min_sum") or 0
+            min_str = f"\nMin deposit: **${min_s:.2f}** USD" if min_s and min_s > 0 else ""
             if cur == "SOL":
-                lines.append(f"**Solana (SOL)**\n```{addr}```")
+                lines.append(f"**Solana (SOL)**{min_str}\n```{addr}```")
             elif cur == "LTC":
-                lines.append(f"**Litecoin (LTC)**\n```{addr}```")
+                lines.append(f"**Litecoin (LTC)**{min_str}\n```{addr}```")
             else:
-                lines.append(f"**{cur}**\n```{addr}```")
+                lines.append(f"**{cur}**{min_str}\n```{addr}```")
 
         embed = discord.Embed(
             title="Deposit",
             description=(
-                "Send **any amount** to your permanent address:\n\n"
+                "Send to your permanent deposit address:\n\n"
                 + "\n\n".join(lines)
-                + "\n\nWrong network = lost funds.\n"
+                + "\n\nDeposits below the minimum are not processed.\n"
+                "Wrong network = lost funds.\n"
                 "Balance updates after Plisio confirms."
             ),
             color=0x2B2D31,
