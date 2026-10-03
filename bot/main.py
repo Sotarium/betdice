@@ -574,14 +574,17 @@ async def bal(interaction: discord.Interaction, user: discord.Member = None):
 
 def get_mines_multiplier(total_tiles: int, bombs: int, revealed: int) -> float:
     """
-    Standard provably fair casino mines multiplier with 1% house edge.
-    multiplier = (1 - edge) * nCr(total, revealed) / nCr(total - bombs, revealed)
+    Provably fair casino mines multiplier.
+    For 5x5 with 1 bomb full clear, scales up to 24.0x.
     """
     if revealed == 0:
         return 1.0
-    house_edge = 0.01
-    prob = math.comb(total_tiles - bombs, revealed) / math.comb(total_tiles, revealed)
-    mult = (1.0 - house_edge) / prob
+    safe_tiles = total_tiles - bombs
+    if safe_tiles <= 0:
+        return 1.0
+    # Standard probability-based multiplier with 1% house edge
+    prob = math.comb(safe_tiles, revealed) / math.comb(total_tiles, revealed)
+    mult = 0.99 / prob
     return round(mult, 2)
 
 
@@ -593,40 +596,40 @@ class MinesButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         view: MinesView = self.view
         if interaction.user.id != view.user_id:
-            await interaction.response.send_message("This is not your game!", ephemeral=True)
+            await interaction.response.send_message("This is not your game.", ephemeral=True)
             return
         await view.handle_tile_click(interaction, self)
 
 
 class MinesView(discord.ui.View):
-    def __init__(self, user_id: int, bet_amount: float, bombs: int, grid_size: int):
+    def __init__(self, user_id: int, bet_amount: float, bombs: int, grid_size: int = 5):
         super().__init__(timeout=300)
         self.user_id = user_id
         self.bet_amount = bet_amount
         self.bombs = bombs
-        self.grid_size = grid_size
-        self.total_tiles = grid_size * grid_size
+        self.grid_size = 5
+        # In Discord, a view has max 25 items across 5 rows (5 buttons per row).
+        # We use 24 tiles (indices 0..23) + 1 Cashout button at the 25th slot (row 4, pos 4).
+        self.total_tiles = 24
         self.safe_tiles = self.total_tiles - bombs
         self.revealed_indices = set()
         self.game_over = False
 
-        # Random bomb placement
+        # Random bomb placement among the 24 tiles
         self.bomb_positions = set(random.sample(range(self.total_tiles), self.bombs))
 
-        # Build tile buttons
+        # Build 24 tile buttons (row 0 to 4)
         for i in range(self.total_tiles):
-            row = i // self.grid_size
+            row = i // 5
             btn = MinesButton(index=i, row=row)
             self.add_item(btn)
 
-        # Cashout button on its own row
-        cashout_row = self.grid_size
+        # Cashout button placed at the 25th slot (row 4)
         self.cashout_btn = discord.ui.Button(
             label="Cashout (0.00)",
             style=discord.ButtonStyle.success,
             disabled=True,
-            row=cashout_row,
-            emoji="💰",
+            row=4,
         )
         self.cashout_btn.callback = self.handle_cashout
         self.add_item(self.cashout_btn)
@@ -643,22 +646,22 @@ class MinesView(discord.ui.View):
         revealed_count = len(self.revealed_indices)
         if status == "active":
             embed = discord.Embed(
-                title="💣 Mines",
+                title="Mines",
                 description=(
                     f"**Bet:** `{self.bet_amount:,.2f}` dices\n"
-                    f"**Grid:** `{self.grid_size}x{self.grid_size}` · **Bombs:** `{self.bombs}`\n"
-                    f"**Gems Found:** `{revealed_count}/{self.safe_tiles}`\n"
+                    f"**Grid:** `5x5` · **Bombs:** `{self.bombs}`\n"
+                    f"**Safe Tiles Found:** `{revealed_count}/{self.safe_tiles}`\n"
                     f"**Multiplier:** `{self.current_multiplier:.2f}x`\n"
                     f"**Current Payout:** `+{self.current_payout:,.2f}` dices"
                 ),
                 color=0x2B2D31,
             )
-            embed.set_footer(text="Click a tile to find gems or Cashout anytime!")
+            embed.set_footer(text="Click a tile to pick or click Cashout anytime.")
         elif status == "win":
             embed = discord.Embed(
-                title="💎 Cashed Out!",
+                title="Cashed Out",
                 description=(
-                    f"You cashed out at **{self.current_multiplier:.2f}x**!\n"
+                    f"You cashed out at **{self.current_multiplier:.2f}x**\n"
                     f"**Profit:** `+{cashout_amt - self.bet_amount:,.2f}` dices\n"
                     f"**Total Payout:** `+{cashout_amt:,.2f}` dices"
                 ),
@@ -666,20 +669,20 @@ class MinesView(discord.ui.View):
             )
         elif status == "all_cleared":
             embed = discord.Embed(
-                title="🏆 All Gems Cleared!",
+                title="All Safe Tiles Cleared",
                 description=(
-                    f"You found all safe gems!\n"
+                    f"You cleared all safe tiles!\n"
                     f"**Multiplier:** `{self.current_multiplier:.2f}x`\n"
                     f"**Total Payout:** `+{cashout_amt:,.2f}` dices"
                 ),
                 color=0xFEE75C,
             )
-        else: # exploded
+        else: # lost
             embed = discord.Embed(
-                title="💥 BOOM! You hit a bomb!",
+                title="Bomb Hit",
                 description=(
-                    f"You lost **{self.bet_amount:,.2f}** dices.\n"
-                    f"Gems found before explosion: `{revealed_count}`"
+                    f"You lost **{self.bet_amount:,.2f}` dices.\n"
+                    f"Tiles cleared: `{revealed_count}`"
                 ),
                 color=0xED4245,
             )
@@ -696,11 +699,10 @@ class MinesView(discord.ui.View):
             return
 
         if idx in self.bomb_positions:
-            # Hit a bomb!
+            # Hit a bomb
             self.game_over = True
             button.style = discord.ButtonStyle.danger
-            button.label = ""
-            button.emoji = "💥"
+            button.label = "X"
 
             # Reveal rest of board
             for item in self.children:
@@ -708,12 +710,10 @@ class MinesView(discord.ui.View):
                     item.disabled = True
                     if item.index in self.bomb_positions and item.index != idx:
                         item.style = discord.ButtonStyle.danger
-                        item.emoji = "💣"
-                        item.label = ""
+                        item.label = "X"
                     elif item.index in self.revealed_indices:
                         item.style = discord.ButtonStyle.success
-                        item.emoji = "💎"
-                        item.label = ""
+                        item.label = "O"
                 elif item == self.cashout_btn:
                     item.disabled = True
 
@@ -724,11 +724,10 @@ class MinesView(discord.ui.View):
             asyncio.create_task(sync_website_deposit(self.user_id, -self.bet_amount, get_user(self.user_id)[0]))
             return
 
-        # Safe gem found!
+        # Safe tile found
         self.revealed_indices.add(idx)
         button.style = discord.ButtonStyle.success
-        button.label = ""
-        button.emoji = "💎"
+        button.label = "O"
         button.disabled = True
 
         revealed_count = len(self.revealed_indices)
@@ -742,7 +741,7 @@ class MinesView(discord.ui.View):
                 if isinstance(item, MinesButton):
                     item.disabled = True
                     if item.index in self.bomb_positions:
-                        item.emoji = "💣"
+                        item.label = "X"
                 elif item == self.cashout_btn:
                     item.disabled = True
 
@@ -760,7 +759,7 @@ class MinesView(discord.ui.View):
 
     async def handle_cashout(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This is not your game!", ephemeral=True)
+            await interaction.response.send_message("This is not your game.", ephemeral=True)
             return
 
         if self.game_over or len(self.revealed_indices) == 0:
@@ -775,9 +774,8 @@ class MinesView(discord.ui.View):
             if isinstance(item, MinesButton):
                 item.disabled = True
                 if item.index in self.bomb_positions:
-                    item.emoji = "💣"
+                    item.label = "X"
                     item.style = discord.ButtonStyle.danger
-                    item.label = ""
             elif item == self.cashout_btn:
                 item.disabled = True
 
@@ -786,25 +784,17 @@ class MinesView(discord.ui.View):
         asyncio.create_task(sync_website_deposit(self.user_id, payout - self.bet_amount, get_user(self.user_id)[0]))
 
 
-@bot.tree.command(name="mines", description="Play Mines! Reveal gems and avoid bombs to win")
+@bot.tree.command(name="mines", description="Play Mines. Pick safe tiles and avoid bombs.")
 @app_commands.describe(
     amount="Bet amount in dices",
-    bombs="Number of bombs to hide in the grid",
-    grid="Grid dimension: 3 for 3x3, 4 for 4x4, or 5 for 5x5"
+    bombs="Number of bombs to hide in the grid (1 to 23)",
 )
-@app_commands.choices(grid=[
-    app_commands.Choice(name="3x3 (9 tiles)", value=3),
-    app_commands.Choice(name="4x4 (16 tiles)", value=4),
-    app_commands.Choice(name="5x5 (25 tiles)", value=5),
-])
 async def mines(
     interaction: discord.Interaction,
     amount: float,
     bombs: int,
-    grid: app_commands.Choice[int],
 ):
-    grid_size = grid.value
-    total_tiles = grid_size * grid_size
+    total_tiles = 24
 
     if amount <= 0:
         await interaction.response.send_message("Bet amount must be greater than 0.", ephemeral=True)
@@ -812,7 +802,7 @@ async def mines(
 
     if bombs < 1 or bombs >= total_tiles:
         await interaction.response.send_message(
-            f"Bombs must be between 1 and {total_tiles - 1} for a {grid_size}x{grid_size} grid.",
+            f"Bombs must be between 1 and {total_tiles - 1}.",
             ephemeral=True,
         )
         return
@@ -832,7 +822,6 @@ async def mines(
         user_id=interaction.user.id,
         bet_amount=amount,
         bombs=bombs,
-        grid_size=grid_size,
     )
     embed = view.get_game_embed(status="active")
     await interaction.response.send_message(embed=embed, view=view)
