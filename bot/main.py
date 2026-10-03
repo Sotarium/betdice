@@ -170,27 +170,65 @@ def dice_emoji(guild) -> str:
 db = sqlite3.connect("dice.db")
 db.execute(
     "CREATE TABLE IF NOT EXISTS users ("
-    "id INTEGER PRIMARY KEY, balance REAL DEFAULT 0, last_daily REAL DEFAULT 0)"
+    "id INTEGER PRIMARY KEY, balance REAL DEFAULT 0, last_daily REAL DEFAULT 0, promo_balance REAL DEFAULT 0)"
 )
-db.commit()
+# Ensure promo_balance column exists if migrating an existing db
+try:
+    db.execute("ALTER TABLE users ADD COLUMN promo_balance REAL DEFAULT 0")
+    db.commit()
+except sqlite3.OperationalError:
+    pass
 
 DAILY_AMOUNT = 100.0
 DAILY_COOLDOWN = 24 * 60 * 60
 
 
 def get_user(uid: int):
-    row = db.execute("SELECT balance, last_daily FROM users WHERE id=?", (uid,)).fetchone()
+    row = db.execute("SELECT balance, last_daily, promo_balance FROM users WHERE id=?", (uid,)).fetchone()
     if row is None:
-        db.execute("INSERT INTO users (id) VALUES (?)", (uid,))
+        db.execute("INSERT INTO users (id, balance, last_daily, promo_balance) VALUES (?, 0, 0, 0)", (uid,))
         db.commit()
-        return 0.0, 0.0
-    return row
+        return 0.0, 0.0, 0.0
+    # Handle older rows where promo_balance might be None
+    bal = row[0] or 0.0
+    daily = row[1] or 0.0
+    promo = row[2] if len(row) > 2 and row[2] is not None else 0.0
+    return bal, daily, promo
 
 
-def add_balance(uid: int, amount: float):
+def add_balance(uid: int, amount: float, is_promo: bool = False):
+    """
+    is_promo=True: balance cannot be tipped or withdrawn directly.
+    When a user bets, promo balance is consumed first.
+    When a user wins from a game, payout is added as clean withdrawable balance!
+    """
     get_user(uid)
-    db.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
+    if is_promo and amount > 0:
+        db.execute("UPDATE users SET promo_balance = promo_balance + ? WHERE id=?", (amount, uid))
+    elif amount < 0:
+        # Spending/deducting: deduct from promo_balance first, then real balance
+        deduct = -amount
+        bal, _, promo = get_user(uid)
+        from_promo = min(promo, deduct)
+        from_real = deduct - from_promo
+        if from_promo > 0:
+            db.execute("UPDATE users SET promo_balance = promo_balance - ? WHERE id=?", (from_promo, uid))
+        if from_real > 0:
+            db.execute("UPDATE users SET balance = balance - ? WHERE id=?", (from_real, uid))
+    else:
+        # Standard positive clean balance (deposit or game winnings)
+        db.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
     db.commit()
+
+
+def get_withdrawable_balance(uid: int) -> float:
+    row = get_user(uid)
+    return row[0]
+
+
+def get_total_balance(uid: int) -> float:
+    row = get_user(uid)
+    return row[0] + row[2]
 
 
 async def notify_user_deposit(discord_id: int, amount: float, new_balance: float):
@@ -340,12 +378,14 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             await interaction.response.send_message("Invalid amount.", ephemeral=True)
             return
 
-        bal, _ = get_user(interaction.user.id)
-        if amt > bal:
-            await interaction.response.send_message(
-                f"Not enough balance. You have **{bal:,.2f}** dices.",
-                ephemeral=True,
-            )
+        withdrawable = get_withdrawable_balance(interaction.user.id)
+        if amt > withdrawable:
+            total = get_total_balance(interaction.user.id)
+            promo = total - withdrawable
+            msg = f"Not enough withdrawable balance. You have **{withdrawable:,.2f}** withdrawable dices."
+            if promo > 0:
+                msg += f"\n*(You have **{promo:,.2f}** in credited/promo bonus that cannot be withdrawn or tipped directly. Play games to turn them into real winnings!)*"
+            await interaction.response.send_message(msg, ephemeral=True)
             return
 
         add_balance(interaction.user.id, -amt)
@@ -458,12 +498,17 @@ class BalanceView(discord.ui.View):
 @app_commands.describe(user="Check someone else's balance")
 async def bal(interaction: discord.Interaction, user: discord.Member = None):
     target = user or interaction.user
-    balance, _ = get_user(target.id)
+    bal, _, promo = get_user(target.id)
+    total = bal + promo
     title = "Your balance" if target == interaction.user else f"{target.display_name}'s balance"
+
+    desc = f"{dice_emoji(interaction.guild)} **{total:,.2f}** dices"
+    if promo > 0:
+        desc += f"\n• Withdrawable: **{bal:,.2f}** dices\n• Bonus (playable only): **{promo:,.2f}** dices"
 
     embed = discord.Embed(
         title=title,
-        description=f"{dice_emoji(interaction.guild)} **{balance:,.2f}** dices",
+        description=desc,
         color=0x2B2D31,
     )
 
@@ -528,15 +573,21 @@ async def credit(
         await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
         return
 
-    add_balance(target_id, amount)
-    new_bal, _ = get_user(target_id)
+    # Add as promo balance: cannot be tipped or withdrawn, but can be played in games!
+    add_balance(target_id, amount, is_promo=True)
+    bal, _, promo = get_user(target_id)
+    total_bal = bal + promo
 
-    asyncio.create_task(notify_user_deposit(target_id, amount, new_bal))
-    asyncio.create_task(sync_website_deposit(target_id, amount, new_bal))
+    asyncio.create_task(notify_user_deposit(target_id, amount, total_bal))
+    asyncio.create_task(sync_website_deposit(target_id, amount, total_bal))
 
     embed = discord.Embed(
         title="Admin Credit Added 🎲",
-        description=f"Credited **+{amount:,.2f}** dices to **{target_name}** (`{target_id}`).\nNew Balance: **{new_bal:,.2f}** dices.",
+        description=(
+            f"Credited **+{amount:,.2f}** dices to **{target_name}** (`{target_id}`).\n"
+            f"Total Balance: **{total_bal:,.2f}** dices (Bonus: **{promo:,.2f}** dices)\n"
+            "*(This credited balance cannot be withdrawn or tipped directly. User can play games to turn it into real winnings!)*"
+        ),
         color=0x2B2D31,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -791,10 +842,10 @@ async def mines(
         )
         return
 
-    balance, _ = get_user(interaction.user.id)
-    if amount > balance:
+    total_bal = get_total_balance(interaction.user.id)
+    if amount > total_bal:
         await interaction.response.send_message(
-            f"Not enough balance. You have **{balance:,.2f}** dices.",
+            f"Not enough balance. You have **{total_bal:,.2f}** dices.",
             ephemeral=True,
         )
         return
@@ -833,12 +884,14 @@ async def tip(interaction: discord.Interaction, user: discord.Member, amount: fl
         await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
         return
 
-    sender_bal, _ = get_user(interaction.user.id)
-    if amount > sender_bal:
-        await interaction.response.send_message(
-            f"Not enough balance. You have **{sender_bal:,.2f}** dices.",
-            ephemeral=True,
-        )
+    withdrawable = get_withdrawable_balance(interaction.user.id)
+    if amount > withdrawable:
+        total = get_total_balance(interaction.user.id)
+        promo = total - withdrawable
+        msg = f"Not enough tippable balance. You have **{withdrawable:,.2f}** tippable dices."
+        if promo > 0:
+            msg += f"\n*(You have **{promo:,.2f}** in credited/promo bonus that cannot be tipped or withdrawn. Play games to turn them into real winnings!)*"
+        await interaction.response.send_message(msg, ephemeral=True)
         return
 
     # Deduct from tipper and add to recipient
