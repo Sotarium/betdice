@@ -23,22 +23,22 @@ BOT_PORT = int(os.getenv("PORT", os.getenv("BOT_PORT", "8080")))
 
 LAYOUT = {
     "important": [
-        ("🎫・ticket", False),
-        ("📢・news", True),
-        ("📩・invite-rewards", False),
-        ("🔨・event", False),
-        ("💝・giveaway", False),
-        ("🚀-invite", False),
+        ("ðŸŽ«ãƒ»ticket", False),
+        ("ðŸ“¢ãƒ»news", True),
+        ("ðŸ“©ãƒ»invite-rewards", False),
+        ("ðŸ”¨ãƒ»event", False),
+        ("ðŸ’ãƒ»giveaway", False),
+        ("ðŸš€-invite", False),
     ],
-    "🎲・PLAY": [
-        ("💰-history", True),
-        ("💸・play-1", False),
-        ("💸・play-2", False),
-        ("💸・play-3", False),
+    "ðŸŽ²ãƒ»PLAY": [
+        ("ðŸ’°-history", True),
+        ("ðŸ’¸ãƒ»play-1", False),
+        ("ðŸ’¸ãƒ»play-2", False),
+        ("ðŸ’¸ãƒ»play-3", False),
     ],
-    "💬・COMMUNITY": [
-        ("✉️・general", False),
-        ("✅・vouch", False),
+    "ðŸ’¬ãƒ»COMMUNITY": [
+        ("âœ‰ï¸ãƒ»general", False),
+        ("âœ…ãƒ»vouch", False),
     ],
 }
 
@@ -194,7 +194,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
     total_clicks = sum(r[1] for r in rows)
 
     if total_clicks < 10:
-        # Not enough data — pure random
+        # Not enough data â€” pure random
         return set(random.sample(range(total_tiles), bombs))
 
     # Build weight array
@@ -210,7 +210,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
     random_threshold = (uniform ** 2) * 0.3  # low variance = random
 
     if variance <= random_threshold:
-        # Random player — 50/50 between two alternating zones
+        # Random player â€” 50/50 between two alternating zones
         # Zone A: even tile indices (cols 0,2,4 per row)
         # Zone B: odd tile indices (cols 1,3 per row)
         zone = random.randint(0, 1)  # 0=even zone, 1=odd zone
@@ -224,7 +224,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
             else:
                 biased_weights.append(0.4 / len(other_tiles))
     else:
-        # Pattern player — boost their top tiles by 25%
+        # Pattern player â€” boost their top tiles by 25%
         biased_weights = []
         for w in weights:
             if w > uniform:
@@ -340,7 +340,7 @@ async def notify_user_deposit(discord_id: int, amount: float, new_balance: float
                     f"Your deposit of **+{amount:,.2f}** has been confirmed!\n"
                     f"Your new balance is **{new_balance:,.2f}** dices."
                 ),
-                color=0x2B2D31,
+                color=0x0498fb,
             )
             await user.send(embed=embed)
     except Exception as e:
@@ -517,7 +517,7 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             # Refund balance to user
             add_balance(interaction.user.id, amt, tx_type="refund")
             await interaction.followup.send(
-                f"❌ **Withdrawal Failed:** {payout_error}\nYour balance of **{amt:,.2f}** dices has been refunded.",
+                f"âŒ **Withdrawal Failed:** {payout_error}\nYour balance of **{amt:,.2f}** dices has been refunded.",
                 ephemeral=True,
             )
             return
@@ -543,14 +543,14 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
 
         tx_info = f"\n**Transaction ID:** `{txn_id}`" if txn_id else ""
         embed = discord.Embed(
-            title="✅ Withdrawal Sent!",
+            title="âœ… Withdrawal Sent!",
             description=(
                 f"**Amount:** {amt:,.2f} dices\n"
                 f"**Currency:** {currency}\n"
                 f"**Address:** `{target_addr}`{tx_info}\n\n"
                 "The payout has been broadcast to the blockchain."
             ),
-            color=0x00E676,
+            color=0x0498fb,
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -588,13 +588,13 @@ async def send_deposit_dm(user: discord.User, currency: str):
             + (f"Min deposit: **${min_s:.2f}** USD\n\n" if min_s and min_s > 0 else "\n")
             + "Wrong network = lost funds."
         ),
-        color=0x2B2D31,
+        color=0x0498fb,
     )
     embed.set_footer(text="This is your permanent deposit address")
     try:
         await user.send(embed=embed)
     except discord.Forbidden:
-        pass  # DMs disabled — caller handles this
+        pass  # DMs disabled â€” caller handles this
 
 
 class DepositCoinView(discord.ui.View):
@@ -639,7 +639,7 @@ class BalanceView(discord.ui.View):
         embed = discord.Embed(
             title="Deposit",
             description="Which network do you want to deposit with?",
-            color=0x2B2D31,
+            color=0x0498fb,
         )
         await interaction.response.send_message(
             embed=embed,
@@ -665,14 +665,14 @@ async def bal(interaction: discord.Interaction, user: discord.Member = None):
 
     desc = f"{dice_emoji(interaction.guild)} **{total:,.2f}** dices"
     if promo > 0:
-        desc += f"\n• Withdrawable: **{bal:,.2f}** dices\n• Non-withdrawable: **{promo:,.2f}** dices"
+        desc += f"\nâ€¢ Withdrawable: **{bal:,.2f}** dices\nâ€¢ Non-withdrawable: **{promo:,.2f}** dices"
     if wager_req > 0:
-        desc += f"\n• Wager Required: **{wager_req:,.2f}** dices"
+        desc += f"\nâ€¢ Wager Required: **{wager_req:,.2f}** dices"
 
     embed = discord.Embed(
         title=title,
         description=desc,
-        color=0x2B2D31,
+        color=0x0498fb,
     )
 
     if target == interaction.user:
@@ -724,8 +724,9 @@ class MinesView(discord.ui.View):
         self.bet_amount = bet_amount
         self.bombs = bombs
         self.grid_size = 5
-        # 4 rows × 5 tiles = 20 tiles, row 4 reserved for cashout button alone
-        self.total_tiles = 20
+        # 24 tiles across rows 0-4, cashout centered in row 4
+        # Row 4 layout: [tile20][tile21][CASHOUT][tile22][tile23]
+        self.total_tiles = 24
         self.safe_tiles = self.total_tiles - bombs
         self.revealed_indices = set()
         self.game_over = False
@@ -733,13 +734,13 @@ class MinesView(discord.ui.View):
         # Biased bomb placement based on player click history
         self.bomb_positions = get_biased_bomb_positions(user_id, self.total_tiles, self.bombs)
 
-        # Build 20 tile buttons across rows 0-3
-        for i in range(self.total_tiles):
-            row = i // 5  # rows 0, 1, 2, 3
+        # Build tiles 0-21 normally (rows 0-3 + first 2 of row 4)
+        for i in range(22):
+            row = i // 5
             btn = MinesButton(index=i, row=row)
             self.add_item(btn)
 
-        # Cashout button on its own row 4 (below the grid)
+        # Cashout button centered in row 4 (position 2 of 5)
         self.cashout_btn = discord.ui.Button(
             label="Cashout (0.00)",
             style=discord.ButtonStyle.success,
@@ -748,6 +749,12 @@ class MinesView(discord.ui.View):
         )
         self.cashout_btn.callback = self.handle_cashout
         self.add_item(self.cashout_btn)
+
+        # Tiles 22 and 23 go after cashout in row 4
+        for i in range(22, 24):
+            btn = MinesButton(index=i, row=4)
+            self.add_item(btn)
+
 
     @property
     def current_multiplier(self) -> float:
@@ -767,31 +774,31 @@ class MinesView(discord.ui.View):
                     f"**Multiplier:** {self.current_multiplier:.2f}x\n"
                     f"**Payout:** +{self.current_payout:,.2f} dices"
                 ),
-                color=0x2B2D31,
+                color=0x0498fb,
             )
         elif status == "win":
             embed = discord.Embed(
                 title="Cashed Out",
                 description=(
-                    f"**{self.current_multiplier:.2f}x** — +{cashout_amt:,.2f} dices"
+                    f"**{self.current_multiplier:.2f}x** â€” +{cashout_amt:,.2f} dices"
                 ),
-                color=0x57F287,
+                color=0x0498fb,
             )
         elif status == "all_cleared":
             embed = discord.Embed(
                 title="Board Cleared",
                 description=(
-                    f"**{self.current_multiplier:.2f}x** — +{cashout_amt:,.2f} dices"
+                    f"**{self.current_multiplier:.2f}x** â€” +{cashout_amt:,.2f} dices"
                 ),
-                color=0xFEE75C,
+                color=0x0498fb,
             )
         else:  # lost
             embed = discord.Embed(
                 title="Bomb Hit",
                 description=(
-                    f"Lost **{self.bet_amount:,.2f}** dices · {revealed_count} tiles cleared"
+                    f"Lost **{self.bet_amount:,.2f}** dices Â· {revealed_count} tiles cleared"
                 ),
-                color=0xED4245,
+                color=0x0498fb,
             )
         return embed
 
@@ -904,7 +911,7 @@ async def mines(
     amount: float,
     bombs: int,
 ):
-    total_tiles = 20
+    total_tiles = 24
 
     if amount <= 0:
         await interaction.response.send_message("Bet amount must be greater than 0.", ephemeral=True)
@@ -998,11 +1005,11 @@ async def tip(
         if wager_req > 0:
             dm_desc += f"\n*(Wager **{wager_amount:,.2f}** dices to unlock withdrawal)*"
         elif not can_withdraw:
-            dm_desc += "\n*(This tip cannot be withdrawn — play to earn real balance!)*"
+            dm_desc += "\n*(This tip cannot be withdrawn â€” play to earn real balance!)*"
         embed = discord.Embed(
             title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
             description=dm_desc,
-            color=0x2B2D31,
+            color=0x0498fb,
         )
         await user.send(embed=embed)
     except Exception as e:
@@ -1013,12 +1020,12 @@ async def tip(
     if wager_req > 0:
         confirm_lines.append(f"Wager requirement set: **{wager_amount:,.2f}** dices before they can withdraw.")
     elif not can_withdraw:
-        confirm_lines.append("Recipient **cannot withdraw** this tip — promo only.")
+        confirm_lines.append("Recipient **cannot withdraw** this tip â€” promo only.")
     confirm_lines.append(f"Your remaining balance: **{sender_new:,.2f}** dices.")
     confirm_embed = discord.Embed(
         title="Tip Sent!",
         description="\n".join(confirm_lines),
-        color=0x2B2D31,
+        color=0x0498fb,
     )
     await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
@@ -1033,7 +1040,7 @@ async def clearall(interaction: discord.Interaction):
     embed = discord.Embed(
         title="Balances Cleared",
         description=f"Reset **{count}** user balance(s) to 0.",
-        color=0xFF0000,
+        color=0x0498fb,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -1055,7 +1062,7 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
     await interaction.response.defer(ephemeral=True)
 
     try:
-        # Add as real clean balance — fully withdrawable and tippable
+        # Add as real clean balance â€” fully withdrawable and tippable
         add_balance(user.id, amount, tx_type="deposit")
 
         new_bal, _, _, _ = get_user(user.id)
@@ -1064,7 +1071,7 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
             embed = discord.Embed(
                 title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
                 description=f"Your new balance: **{new_bal:,.2f}** dices",
-                color=0x2B2D31,
+                color=0x0498fb,
             )
             await user.send(embed=embed)
         except Exception as e:
@@ -1073,7 +1080,7 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
         confirm_embed = discord.Embed(
             title="Balance Added!",
             description=f"Added **{amount:,.2f}** dices to {user.mention}.\nTheir new balance: **{new_bal:,.2f}** dices.",
-            color=0x2B2D31,
+            color=0x0498fb,
         )
         await interaction.followup.send(embed=confirm_embed, ephemeral=True)
     except Exception as e:
@@ -1113,7 +1120,7 @@ async def remove_cmd(interaction: discord.Interaction, user: discord.Member, amo
     confirm_embed = discord.Embed(
         title="Balance Removed",
         description=f"Removed **{amount:,.2f}** dices from {user.mention}.\nTheir new balance: **{new_total:,.2f}** dices.",
-        color=0xFF0000,
+        color=0x0498fb,
     )
     await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
@@ -1271,7 +1278,7 @@ async def generate_profit_card(target: discord.Member) -> io.BytesIO:
             draw.rounded_rectangle([rx - 8, y, W - 28, y + 36], radius=8, fill=row_bg)
             # Icon circle
             draw.ellipse([rx, y + 8, rx + 20, y + 28], fill=(30, 180, 80, 60))
-            draw.text((rx + 4, y + 10), "↓", font=font_sm, fill=(0, 210, 90, 255))
+            draw.text((rx + 4, y + 10), "â†“", font=font_sm, fill=(0, 210, 90, 255))
             draw.text((rx + 28, y + 12), "Deposit", font=font_sm, fill=(200, 205, 220, 255))
             import datetime
             dt = datetime.datetime.fromtimestamp(dep_ts)
@@ -1357,3 +1364,4 @@ async def run_bot_and_server():
 
 if __name__ == "__main__":
     asyncio.run(run_bot_and_server())
+
