@@ -1210,11 +1210,62 @@ async def profit_cmd(interaction: discord.Interaction, user: discord.Member):
         raise
 
 
+async def poll_pending_deposits():
+    """
+    Periodically checks the website for uncredited Plisio deposits.
+    Ensures deposits work even when the bot cannot receive direct inbound webhooks.
+    """
+    import aiohttp
+    await bot.wait_until_ready()
+    print("[Deposit Poller] Started background polling for deposits...")
+    while not bot.is_closed():
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{SITE_URL}/api/plisio/pending-deposits",
+                    headers={"Authorization": f"Bearer {BOT_INTERNAL_SECRET}"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        deposits = data.get("deposits", [])
+                        for dep in deposits:
+                            dep_id = dep.get("id")
+                            discord_id = int(dep.get("discordId"))
+                            amount = float(dep.get("amount", 0))
+
+                            if amount > 0:
+                                add_balance(discord_id, amount)
+                                db.execute(
+                                    "UPDATE transactions SET type='deposit' WHERE user_id=? AND type='balance' ORDER BY id DESC LIMIT 1",
+                                    (discord_id,)
+                                )
+                                db.commit()
+                                new_bal, _, _, _ = get_user(discord_id)
+                                print(f"[Deposit Poller] Credited user {discord_id} with {amount}. New Balance: {new_bal}")
+
+                                asyncio.create_task(notify_user_deposit(discord_id, amount, new_bal))
+                                asyncio.create_task(sync_website_deposit(discord_id, amount, new_bal))
+
+                            # Acknowledge and remove from queue
+                            await session.post(
+                                f"{SITE_URL}/api/plisio/pending-deposits",
+                                headers={"Authorization": f"Bearer {BOT_INTERNAL_SECRET}"},
+                                json={"id": dep_id},
+                                timeout=aiohttp.ClientTimeout(total=5),
+                            )
+        except Exception as e:
+            # Silent retry
+            pass
+        await asyncio.sleep(4)
+
+
 async def run_bot_and_server():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise SystemExit("Set DISCORD_TOKEN environment variable")
     await start_http_server()
+    asyncio.create_task(poll_pending_deposits())
     await bot.start(token)
 
 

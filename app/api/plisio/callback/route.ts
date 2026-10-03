@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { queueDeposit } from "../pending-deposits/route";
 
 /**
  * Plisio webhook – set Status URL in Plisio dashboard to:
@@ -23,6 +24,17 @@ export async function POST(req: NextRequest) {
       const amount = parseFloat(data.source_amount || data.amount || "0");
       console.log(`→ Credit user ${uid} with ${amount}`);
 
+      const depositPayload = {
+        discordId: String(uid),
+        amount: amount,
+        currency: data.currency || data.psys_cid || "CRYPTO",
+        txid: data.txn_id || data.tx_url || "",
+      };
+
+      // 1. Always queue deposit in site memory for bot polling
+      queueDeposit(depositPayload);
+
+      // 2. Also try direct POST in case bot URL is set & reachable
       const botUrl = process.env.BOT_INTERNAL_URL || process.env.BOT_URL;
       const botSecret = process.env.BOT_INTERNAL_SECRET || "betdice_secret";
 
@@ -34,17 +46,12 @@ export async function POST(req: NextRequest) {
               "Content-Type": "application/json",
               Authorization: `Bearer ${botSecret}`,
             },
-            body: JSON.stringify({
-              discordId: String(uid),
-              amount: amount,
-              currency: data.currency || data.psys_cid || "CRYPTO",
-              txid: data.txn_id || data.tx_url || "",
-            }),
+            body: JSON.stringify(depositPayload),
           });
           const resData = await forwardRes.json().catch(() => ({}));
           console.log("[Bot forward response]", forwardRes.status, resData);
         } catch (botErr) {
-          console.error("[Bot forward error] Failed to reach bot listener:", botErr);
+          console.error("[Bot forward error] Failed to reach direct bot listener:", botErr);
         }
       }
     }
