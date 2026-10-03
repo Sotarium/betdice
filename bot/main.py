@@ -410,9 +410,58 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             await interaction.response.send_message(msg, ephemeral=True)
             return
 
+        await interaction.response.defer(ephemeral=True)
+
+        target_addr = self.address.value.strip()
+        # Detect currency
+        # SOL addresses are base58 and typically 32-44 characters, LTC starts with L, M, or ltc1
+        currency = "LTC" if (target_addr.startswith("L") or target_addr.startswith("M") or target_addr.startswith("ltc1")) else "SOL"
+
+        # Deduct balance upfront
         add_balance(interaction.user.id, -amt)
 
         import aiohttp
+        payout_success = False
+        payout_error = None
+        txn_id = None
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{SITE_URL}/api/plisio/withdraw",
+                    json={
+                        "secret": BOT_INTERNAL_SECRET,
+                        "currency": currency,
+                        "to": target_addr,
+                        "amount": amt,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=25),
+                ) as resp:
+                    resp_data = await resp.json(content_type=None)
+                    if resp.status == 200 and resp_data.get("status") == "success":
+                        payout_success = True
+                        txn_id = resp_data.get("txn_id")
+                    else:
+                        payout_error = resp_data.get("error", "Plisio withdrawal failed")
+        except Exception as e:
+            payout_error = str(e)
+
+        if not payout_success:
+            # Refund balance to user
+            add_balance(interaction.user.id, amt)
+            await interaction.followup.send(
+                f"❌ **Withdrawal Failed:** {payout_error}\nYour balance of **{amt:,.2f}** dices has been refunded.",
+                ephemeral=True,
+            )
+            return
+
+        # Tag transaction in database
+        db.execute(
+            "UPDATE transactions SET type='withdraw' WHERE user_id=? AND type='bet' ORDER BY id DESC LIMIT 1",
+            (interaction.user.id,)
+        )
+        db.commit()
+
         avatar_hash = interaction.user.avatar.key if interaction.user.avatar else None
         try:
             async with aiohttp.ClientSession() as session:
@@ -432,16 +481,18 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
         except Exception as e:
             print(f"Site sync error: {e}")
 
+        tx_info = f"\n**Transaction ID:** `{txn_id}`" if txn_id else ""
         embed = discord.Embed(
-            title="Withdraw requested",
+            title="✅ Withdrawal Sent!",
             description=(
                 f"**Amount:** {amt:,.2f} dices\n"
-                f"**Address:** `{self.address.value}`\n\n"
-                "Balance deducted. Payout will be processed."
+                f"**Currency:** {currency}\n"
+                f"**Address:** `{target_addr}`{tx_info}\n\n"
+                "The payout has been broadcast to the blockchain."
             ),
-            color=0x2B2D31,
+            color=0x00E676,
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class BalanceView(discord.ui.View):
