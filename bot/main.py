@@ -962,33 +962,40 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
         await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
         return
 
-    # Add as real clean balance — fully withdrawable and tippable
-    add_balance(user.id, amount)
-    # Tag as deposit so it appears in profit history
-    db.execute(
-        "UPDATE transactions SET type='deposit' WHERE user_id=? AND type='balance' ORDER BY id DESC LIMIT 1",
-        (user.id,)
-    )
-    db.commit()
-
-    new_bal, _, _, _ = get_user(user.id)
+    await interaction.response.defer(ephemeral=True)
 
     try:
-        embed = discord.Embed(
-            title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
-            description=f"Your new balance: **{new_bal:,.2f}** dices",
+        # Add as real clean balance — fully withdrawable and tippable
+        add_balance(user.id, amount)
+        # Tag as deposit so it appears in profit history
+        db.execute(
+            "UPDATE transactions SET type='deposit' WHERE user_id=? AND type='balance' ORDER BY id DESC LIMIT 1",
+            (user.id,)
+        )
+        db.commit()
+
+        new_bal, _, _, _ = get_user(user.id)
+
+        try:
+            embed = discord.Embed(
+                title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
+                description=f"Your new balance: **{new_bal:,.2f}** dices",
+                color=0x2B2D31,
+            )
+            await user.send(embed=embed)
+        except Exception as e:
+            print(f"[Add DM Error] Could not DM user {user.id}: {e}")
+
+        confirm_embed = discord.Embed(
+            title="Balance Added!",
+            description=f"Added **{amount:,.2f}** dices to {user.mention}.\nTheir new balance: **{new_bal:,.2f}** dices.",
             color=0x2B2D31,
         )
-        await user.send(embed=embed)
+        await interaction.followup.send(embed=confirm_embed, ephemeral=True)
     except Exception as e:
-        print(f"[Add DM Error] Could not DM user {user.id}: {e}")
+        print(f"[Add Error] {e}")
+        await interaction.followup.send(f"Error adding balance: {e}", ephemeral=True)
 
-    confirm_embed = discord.Embed(
-        title="Balance Added!",
-        description=f"Added **{amount:,.2f}** dices to {user.mention}.\nTheir new balance: **{new_bal:,.2f}** dices.",
-        color=0x2B2D31,
-    )
-    await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
 
 @bot.tree.command(name="remove", description="Remove balance from a user")
