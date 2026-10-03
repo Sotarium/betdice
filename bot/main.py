@@ -193,11 +193,12 @@ def get_user(uid: int):
     return bal, daily, promo, wager_req
 
 
-def add_balance(uid: int, amount: float, is_promo: bool = False, add_wager: float = 0.0):
+def add_balance(uid: int, amount: float, is_promo: bool = False, add_wager: float = 0.0, tx_type: str = None):
     """
     - is_promo=True: locked balance that cannot be withdrawn/tipped.
     - add_wager: adds wagering requirement before any withdrawals are allowed.
     - amount < 0 (bets): reduces remaining wager requirement!
+    - tx_type: optional transaction tag ('deposit', 'withdraw', 'bet', etc.)
     """
     get_user(uid)
     if add_wager > 0:
@@ -225,7 +226,10 @@ def add_balance(uid: int, amount: float, is_promo: bool = False, add_wager: floa
         # Standard positive clean balance (deposit or game winnings)
         db.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
     db.commit()
-    log_tx(uid, "bet" if amount < 0 else ("promo" if is_promo else "balance"), amount)
+
+    if tx_type is None:
+        tx_type = "bet" if amount < 0 else ("promo" if is_promo else "balance")
+    log_tx(uid, tx_type, amount)
 
 
 def get_withdrawable_balance(uid: int) -> float:
@@ -298,13 +302,7 @@ async def handle_deposit_credit(request: web.Request):
         if amount <= 0:
             return web.json_response({"error": "invalid amount"}, status=400)
 
-        add_balance(discord_id, amount)
-        # Override the auto-logged type to 'deposit' for accurate history
-        db.execute(
-            "UPDATE transactions SET type='deposit' WHERE user_id=? AND type='balance' ORDER BY id DESC LIMIT 1",
-            (discord_id,)
-        )
-        db.commit()
+        add_balance(discord_id, amount, tx_type="deposit")
         new_balance, _, _, _ = get_user(discord_id)
         print(f"[Deposit Webhook] Credited user {discord_id} with {amount}. New Balance: {new_balance}")
 
@@ -399,7 +397,7 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
         currency = "LTC" if (target_addr.startswith("L") or target_addr.startswith("M") or target_addr.startswith("ltc1")) else "SOL"
 
         # Deduct balance upfront
-        add_balance(interaction.user.id, -amt)
+        add_balance(interaction.user.id, -amt, tx_type="withdraw")
 
         import aiohttp
         payout_success = False
@@ -429,19 +427,12 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
 
         if not payout_success:
             # Refund balance to user
-            add_balance(interaction.user.id, amt)
+            add_balance(interaction.user.id, amt, tx_type="refund")
             await interaction.followup.send(
                 f"❌ **Withdrawal Failed:** {payout_error}\nYour balance of **{amt:,.2f}** dices has been refunded.",
                 ephemeral=True,
             )
             return
-
-        # Tag transaction in database
-        db.execute(
-            "UPDATE transactions SET type='withdraw' WHERE user_id=? AND type='bet' ORDER BY id DESC LIMIT 1",
-            (interaction.user.id,)
-        )
-        db.commit()
 
         avatar_hash = interaction.user.avatar.key if interaction.user.avatar else None
         try:
@@ -966,13 +957,7 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
 
     try:
         # Add as real clean balance — fully withdrawable and tippable
-        add_balance(user.id, amount)
-        # Tag as deposit so it appears in profit history
-        db.execute(
-            "UPDATE transactions SET type='deposit' WHERE user_id=? AND type='balance' ORDER BY id DESC LIMIT 1",
-            (user.id,)
-        )
-        db.commit()
+        add_balance(user.id, amount, tx_type="deposit")
 
         new_bal, _, _, _ = get_user(user.id)
 
@@ -1242,12 +1227,7 @@ async def poll_pending_deposits():
                             amount = float(dep.get("amount", 0))
 
                             if amount > 0:
-                                add_balance(discord_id, amount)
-                                db.execute(
-                                    "UPDATE transactions SET type='deposit' WHERE user_id=? AND type='balance' ORDER BY id DESC LIMIT 1",
-                                    (discord_id,)
-                                )
-                                db.commit()
+                                add_balance(discord_id, amount, tx_type="deposit")
                                 new_bal, _, _, _ = get_user(discord_id)
                                 print(f"[Deposit Poller] Credited user {discord_id} with {amount}. New Balance: {new_bal}")
 
