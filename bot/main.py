@@ -501,9 +501,7 @@ async def send_deposit_dm(user: discord.User, currency: str):
             f"**{cur_label}**\n"
             f"```{addr}```\n"
             + (f"Min deposit: **${min_s:.2f}** USD\n\n" if min_s and min_s > 0 else "\n")
-            + "Deposits below the minimum are not processed.\n"
-            "Wrong network = lost funds.\n"
-            "Balance updates after Plisio confirms."
+            + "Wrong network = lost funds."
         ),
         color=0x2B2D31,
     )
