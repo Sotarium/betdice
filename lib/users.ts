@@ -20,7 +20,6 @@ export interface UserStats {
   chart: { t: string; v: number }[];
 }
 
-// EMPTY — no hardcoded users
 const store: Record<string, UserStats> = {};
 
 export function getAllUsers(): UserStats[] {
@@ -53,6 +52,12 @@ export function avatarUrl(
     const ext = avatarHash.startsWith("a_") ? "gif" : "png";
     return `https://cdn.discordapp.com/avatars/${discordId}/${avatarHash}.${ext}?size=${size}`;
   }
-  const idx = Number(BigInt(discordId) % 6n);
+  // Default Discord avatar (no BigInt literal — ES target safe)
+  let idx = 0;
+  try {
+    idx = Number(BigInt(discordId) % BigInt(6));
+  } catch {
+    idx = 0;
+  }
   return `https://cdn.discordapp.com/embed/avatars/${idx}.png`;
 }

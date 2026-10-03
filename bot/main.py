@@ -1,7 +1,7 @@
 """
 Betdice Discord bot
 Requires env: DISCORD_TOKEN
-Optional: SITE_URL (default https://betdice.vercel.app)
+Optional: SITE_URL
 """
 import os
 import discord
@@ -10,7 +10,11 @@ import sqlite3
 import time
 import io
 
-SITE_URL = os.getenv("SITE_URL", "https://betdice.vercel.app")
+# Real Vercel domain (not betdice.vercel.app unless you added that custom domain)
+SITE_URL = os.getenv(
+    "SITE_URL",
+    "https://betdice-frouxzys-projects-fcc3f71b.vercel.app",
+)
 
 LAYOUT = {
     "important": [
@@ -69,6 +73,7 @@ class SetupBot(discord.Client):
 
     async def on_ready(self):
         print(f"Logged in as {self.user}")
+        print(f"SITE_URL={SITE_URL}")
         if not self.guilds:
             print("Bot is NOT in any server. Re-invite it with the OAuth2 URL.")
         for guild in self.guilds:
@@ -183,8 +188,7 @@ def add_balance(uid: int, amount: float):
     db.commit()
 
 
-async def get_deposit_address(discord_id: int, username: str, avatar_hash: str | None):
-    """Fetch unique permanent Plisio address — any amount can be sent."""
+async def get_deposit_address(discord_id: int, username: str, avatar_hash):
     import aiohttp
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -192,8 +196,12 @@ async def get_deposit_address(discord_id: int, username: str, avatar_hash: str |
             json={"discordId": str(discord_id), "currency": "USDT_TRX"},
             timeout=aiohttp.ClientTimeout(total=20),
         ) as r:
-            data = await r.json()
+            text = await r.text()
             status = r.status
+            try:
+                data = await r.json(content_type=None)
+            except Exception:
+                data = {"error": text[:300]}
 
         if status == 200 and data.get("address"):
             try:
@@ -305,17 +313,16 @@ class BalanceView(discord.ui.View):
                 avatar_hash,
             )
         except Exception as e:
-            await interaction.followup.send(
-                f"Network error: `{e}`",
-                ephemeral=True,
-            )
+            await interaction.followup.send(f"Network error: `{e}`", ephemeral=True)
             return
 
         if status != 200 or not data.get("address"):
-            err = data.get("error", "Unknown error")
+            err = data.get("error", str(data)[:200])
             await interaction.followup.send(
                 f"Could not get deposit address.\n`{err}`\n\n"
-                "Set **PLISIO_SECRET_KEY** on Vercel and Status URL in Plisio.",
+                "1) Set PLISIO_SECRET_KEY on Vercel\n"
+                "2) Wait for Vercel deploy to succeed\n"
+                f"3) SITE_URL={SITE_URL}",
                 ephemeral=True,
             )
             return
