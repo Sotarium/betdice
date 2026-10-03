@@ -890,7 +890,7 @@ async def clearall(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="add", description="Add gambable balance to a user")
+@bot.tree.command(name="add", description="Add withdrawable balance to a user")
 @app_commands.describe(
     user="The user to give balance to",
     amount="Amount of dices to add",
@@ -904,15 +904,15 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
         await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
         return
 
-    # Add as promo (gambable only — cannot withdraw or tip)
-    add_balance(user.id, amount, is_promo=True)
+    # Add as real clean balance — fully withdrawable and tippable
+    add_balance(user.id, amount)
 
-    _, _, promo_new, _ = get_user(user.id)
+    new_bal, _, _, _ = get_user(user.id)
 
     try:
         embed = discord.Embed(
-            title="Balance Added!",
-            description=f"You received **{amount:,.2f}** gambable dices!\nYour gambable balance: **{promo_new:,.2f}** dices\n*(This balance can be played but not withdrawn or tipped)*",
+            title=f"\"User\" Tipped You {amount:,.2f}!",
+            description=f"Your new balance: **{new_bal:,.2f}** dices",
             color=0x2B2D31,
         )
         await user.send(embed=embed)
@@ -921,8 +921,44 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
 
     confirm_embed = discord.Embed(
         title="Balance Added!",
-        description=f"Added **{amount:,.2f}** gambable dices to {user.mention}.",
+        description=f"Added **{amount:,.2f}** dices to {user.mention}.\nTheir new balance: **{new_bal:,.2f}** dices.",
         color=0x2B2D31,
+    )
+    await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
+
+
+@bot.tree.command(name="remove", description="Remove balance from a user")
+@app_commands.describe(
+    user="The user to remove balance from",
+    amount="Amount of dices to remove",
+)
+async def remove_cmd(interaction: discord.Interaction, user: discord.Member, amount: float):
+    if interaction.user.id != ALLOWED_TIPPER_ID:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    if amount <= 0:
+        await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
+        return
+
+    total = get_total_balance(user.id)
+    if amount > total:
+        await interaction.response.send_message(
+            f"{user.mention} only has **{total:,.2f}** dices. Can't remove more than they have.",
+            ephemeral=True,
+        )
+        return
+
+    # Deduct from promo first, then real balance
+    add_balance(user.id, -amount)
+
+    new_bal, _, new_promo, _ = get_user(user.id)
+    new_total = new_bal + new_promo
+
+    confirm_embed = discord.Embed(
+        title="Balance Removed",
+        description=f"Removed **{amount:,.2f}** dices from {user.mention}.\nTheir new balance: **{new_total:,.2f}** dices.",
+        color=0xFF0000,
     )
     await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
