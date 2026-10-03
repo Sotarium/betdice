@@ -18,13 +18,35 @@ export async function POST(req: NextRequest) {
 
     console.log("[Plisio callback]", JSON.stringify(data));
 
-    // TODO: verify data.verify_hash with PLISIO_SECRET_KEY
-    // TODO: credit Discord user (data.deposit_uid) in your real DB / notify the bot
-
     if (data.status === "completed" && (data.ipn_type === "pay_in" || data.ipn_type === "invoice")) {
       const uid = data.deposit_uid || data.order_number;
       const amount = parseFloat(data.source_amount || data.amount || "0");
       console.log(`→ Credit user ${uid} with ${amount}`);
+
+      const botUrl = process.env.BOT_INTERNAL_URL || process.env.BOT_URL;
+      const botSecret = process.env.BOT_INTERNAL_SECRET || "betdice_secret";
+
+      if (botUrl && uid) {
+        try {
+          const forwardRes = await fetch(`${botUrl.replace(/\/$/, "")}/deposit-credit`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${botSecret}`,
+            },
+            body: JSON.stringify({
+              discordId: String(uid),
+              amount: amount,
+              currency: data.currency || data.psys_cid || "CRYPTO",
+              txid: data.txn_id || data.tx_url || "",
+            }),
+          });
+          const resData = await forwardRes.json().catch(() => ({}));
+          console.log("[Bot forward response]", forwardRes.status, resData);
+        } catch (botErr) {
+          console.error("[Bot forward error] Failed to reach bot listener:", botErr);
+        }
+      }
     }
 
     return NextResponse.json({ status: "ok" });

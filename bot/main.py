@@ -9,11 +9,15 @@ from discord import app_commands
 import sqlite3
 import time
 import io
+import asyncio
+from aiohttp import web
 
 SITE_URL = os.getenv(
     "SITE_URL",
     "https://betdice-frouxzys-projects-fcc3f71b.vercel.app",
 )
+BOT_INTERNAL_SECRET = os.getenv("BOT_INTERNAL_SECRET", "betdice_secret")
+BOT_PORT = int(os.getenv("PORT", os.getenv("BOT_PORT", "8080")))
 
 LAYOUT = {
     "important": [
@@ -185,6 +189,91 @@ def add_balance(uid: int, amount: float):
     get_user(uid)
     db.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
     db.commit()
+
+
+async def notify_user_deposit(discord_id: int, amount: float, new_balance: float):
+    try:
+        user = await bot.fetch_user(discord_id)
+        if user:
+            embed = discord.Embed(
+                title="Deposit Credited! 🎲",
+                description=(
+                    f"Your deposit of **+{amount:,.2f}** has been confirmed!\n"
+                    f"Your new balance is **{new_balance:,.2f}** dices."
+                ),
+                color=0x2B2D31,
+            )
+            await user.send(embed=embed)
+    except Exception as e:
+        print(f"[Notify Error] Could not DM user {discord_id}: {e}")
+
+
+async def sync_website_deposit(discord_id: int, amount: float, new_balance: float):
+    try:
+        import aiohttp
+        user = await bot.fetch_user(discord_id)
+        username = user.name if user else f"User-{discord_id}"
+        avatar_hash = user.avatar.key if user and user.avatar else None
+
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"{SITE_URL}/api/users/sync",
+                json={
+                    "discordId": str(discord_id),
+                    "username": username,
+                    "avatar": avatar_hash,
+                    "type": "Deposit",
+                    "amount": amount,
+                    "balance": new_balance,
+                    "profit": 0,
+                    "label": "crypto_deposit",
+                },
+                timeout=aiohttp.ClientTimeout(total=10),
+            )
+    except Exception as e:
+        print(f"[Sync Error] Website sync failed: {e}")
+
+
+async def handle_deposit_credit(request: web.Request):
+    auth_header = request.headers.get("Authorization", "")
+    expected = f"Bearer {BOT_INTERNAL_SECRET}"
+    if auth_header != expected:
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    try:
+        data = await request.json()
+        discord_id = int(data.get("discordId"))
+        amount = float(data.get("amount", 0))
+
+        if amount <= 0:
+            return web.json_response({"error": "invalid amount"}, status=400)
+
+        add_balance(discord_id, amount)
+        new_balance, _ = get_user(discord_id)
+        print(f"[Deposit Webhook] Credited user {discord_id} with {amount}. New Balance: {new_balance}")
+
+        asyncio.create_task(notify_user_deposit(discord_id, amount, new_balance))
+        asyncio.create_task(sync_website_deposit(discord_id, amount, new_balance))
+
+        return web.json_response({
+            "status": "credited",
+            "discordId": str(discord_id),
+            "amount": amount,
+            "newBalance": new_balance,
+        })
+    except Exception as e:
+        print(f"[Deposit Webhook Error] {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def start_http_server():
+    app = web.Application()
+    app.router.add_post("/deposit-credit", handle_deposit_credit)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", BOT_PORT)
+    await site.start()
+    print(f"[Bot Webhook] HTTP listener running on port {BOT_PORT}")
 
 
 async def get_deposit_address(discord_id: int, username: str, avatar_hash):
@@ -403,8 +492,13 @@ async def daily(interaction: discord.Interaction):
     )
 
 
-if __name__ == "__main__":
+async def run_bot_and_server():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise SystemExit("Set DISCORD_TOKEN environment variable")
-    bot.run(token)
+    await start_http_server()
+    await bot.start(token)
+
+
+if __name__ == "__main__":
+    asyncio.run(run_bot_and_server())
