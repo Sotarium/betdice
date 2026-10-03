@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
  *   secret: string,
  *   currency: "SOL" | "LTC",
  *   to: string,
- *   amount: number // in USD or currency depending on plisio config, or dice amount
+ *   amount: number // in USD (dices)
  * }
  */
 export async function POST(req: NextRequest) {
@@ -34,11 +34,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const cur = currency.toUpperCase();
+
+    // 1. Fetch current exchange rate to convert USD (dices) -> crypto amount
+    let cryptoAmount = amount;
+    try {
+      const rateRes = await fetch(
+        `https://api.plisio.net/api/v1/currencies/USD?api_key=${apiKey}`,
+        { method: "GET" }
+      );
+      const rateData = await rateRes.json();
+      if (rateData.status === "success" && Array.isArray(rateData.data)) {
+        const coin = rateData.data.find(
+          (c: any) => c.currency === cur || c.psys_cid === cur
+        );
+        if (coin && coin.price_usd && parseFloat(coin.price_usd) > 0) {
+          const price = parseFloat(coin.price_usd);
+          // e.g. 0.80 USD / 140 USD per SOL = 0.005714 SOL
+          cryptoAmount = amount / price;
+          // Trim to appropriate decimals (8 decimals standard)
+          cryptoAmount = parseFloat(cryptoAmount.toFixed(8));
+          console.log(`[Withdraw] ${amount} USD converted to ${cryptoAmount} ${cur} (Rate: $${price})`);
+        }
+      }
+    } catch (e) {
+      console.warn("[Withdraw] Rate fetch failed, using original amount:", e);
+    }
+
     const params = new URLSearchParams({
       api_key: apiKey,
-      currency: currency.toUpperCase(),
+      currency: cur,
       to: to.trim(),
-      amount: String(amount),
+      amount: String(cryptoAmount),
       type: "cash_out",
     });
 
@@ -62,6 +89,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       status: "success",
       txn_id: data.data?.txn_id,
+      cryptoAmount,
       data: data.data,
     });
   } catch (error: any) {
