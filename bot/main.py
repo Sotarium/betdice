@@ -13,6 +13,10 @@ import time
 import io
 import asyncio
 from aiohttp import web
+import matplotlib
+matplotlib.use("Agg")  # non-interactive backend, required for bots
+import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw, ImageFont
 
 SITE_URL = os.getenv(
     "SITE_URL",
@@ -79,6 +83,7 @@ class SetupBot(discord.Client):
     async def on_ready(self):
         print(f"Logged in as {self.user}")
         print(f"SITE_URL={SITE_URL}")
+        await refund_orphaned_games()
         if not self.guilds:
             print("Bot is NOT in any server. Re-invite it with the OAuth2 URL.")
         for guild in self.guilds:
@@ -166,7 +171,49 @@ db.execute(
     "user_id INTEGER, tile_index INTEGER, count INTEGER DEFAULT 0, "
     "PRIMARY KEY (user_id, tile_index))"
 )
+db.execute(
+    "CREATE TABLE IF NOT EXISTS active_games ("
+    "user_id INTEGER PRIMARY KEY, game TEXT, bet_amount REAL, started_at REAL)"
+)
 db.commit()
+
+
+def start_active_game(user_id: int, game: str, bet_amount: float):
+    """Record a game as in-progress so it can be refunded on bot restart."""
+    db.execute(
+        "INSERT OR REPLACE INTO active_games (user_id, game, bet_amount, started_at) VALUES (?, ?, ?, ?)",
+        (user_id, game, bet_amount, time.time()),
+    )
+    db.commit()
+
+
+def end_active_game(user_id: int):
+    """Remove game from active tracking when it finishes normally."""
+    db.execute("DELETE FROM active_games WHERE user_id = ?", (user_id,))
+    db.commit()
+
+
+async def refund_orphaned_games():
+    """On bot startup: refund any games that were in-progress when bot died."""
+    rows = db.execute("SELECT user_id, game, bet_amount FROM active_games").fetchall()
+    if not rows:
+        return
+    print(f"[Startup] Refunding {len(rows)} orphaned game(s)...")
+    for user_id, game, bet_amount in rows:
+        add_balance(user_id, bet_amount, tx_type="refund")
+        print(f"  Refunded {bet_amount} to user {user_id} ({game})")
+        try:
+            user = await bot.fetch_user(user_id)
+            await user.send(
+                f"Your **{game}** game was interrupted when the bot restarted.\n"
+                f"Your bet of **{bet_amount:,.2f}** dices has been refunded."
+            )
+        except Exception:
+            pass
+    db.execute("DELETE FROM active_games")
+    db.commit()
+    print(f"[Startup] Refunds complete.")
+
 
 
 def record_mines_click(user_id: int, tile_index: int):
@@ -835,7 +882,7 @@ class MinesView(discord.ui.View):
             embed = self.get_game_embed(status="lost")
             await interaction.response.edit_message(embed=embed, view=self)
 
-            # Sync loss to website
+            end_active_game(self.user_id)
             asyncio.create_task(sync_website_deposit(self.user_id, -self.bet_amount, get_user(self.user_id)[0]))
             return
 
@@ -864,6 +911,7 @@ class MinesView(discord.ui.View):
 
             embed = self.get_game_embed(status="all_cleared", cashout_amt=payout)
             await interaction.response.edit_message(embed=embed, view=self)
+            end_active_game(self.user_id)
             asyncio.create_task(sync_website_deposit(self.user_id, payout - self.bet_amount, get_user(self.user_id)[0]))
             return
 
@@ -898,6 +946,7 @@ class MinesView(discord.ui.View):
 
         embed = self.get_game_embed(status="win", cashout_amt=payout)
         await interaction.response.edit_message(embed=embed, view=self)
+        end_active_game(self.user_id)
         asyncio.create_task(sync_website_deposit(self.user_id, payout - self.bet_amount, get_user(self.user_id)[0]))
 
 
@@ -934,6 +983,7 @@ async def mines(
 
     # Deduct bet upfront
     add_balance(interaction.user.id, -amount)
+    start_active_game(interaction.user.id, "Mines", amount)
 
     view = MinesView(
         user_id=interaction.user.id,
