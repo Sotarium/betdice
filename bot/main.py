@@ -10,7 +10,6 @@ import sqlite3
 import time
 import io
 
-# Real Vercel domain (not betdice.vercel.app unless you added that custom domain)
 SITE_URL = os.getenv(
     "SITE_URL",
     "https://betdice-frouxzys-projects-fcc3f71b.vercel.app",
@@ -193,7 +192,7 @@ async def get_deposit_address(discord_id: int, username: str, avatar_hash):
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{SITE_URL}/api/plisio/deposit",
-            json={"discordId": str(discord_id), "currency": "USDT_TRX"},
+            json={"discordId": str(discord_id)},
             timeout=aiohttp.ClientTimeout(total=20),
         ) as r:
             text = await r.text()
@@ -234,8 +233,8 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
         max_length=12,
     )
     address = discord.ui.TextInput(
-        label="Your USDT TRC20 address",
-        placeholder="Paste your Tron USDT address",
+        label="Your Solana wallet address",
+        placeholder="Paste your SOL address",
         required=True,
         min_length=10,
         max_length=128,
@@ -284,8 +283,8 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             title="Withdraw requested",
             description=(
                 f"**Amount:** {amt:,.2f} dices\n"
-                f"**Address:** `{self.address.value}`\n\n"
-                "Balance deducted. Payout will be processed."
+                f"**Solana address:** `{self.address.value}`\n\n"
+                "Balance deducted. SOL payout will be processed."
             ),
             color=0x2B2D31,
         )
@@ -320,28 +319,28 @@ class BalanceView(discord.ui.View):
             err = data.get("error", str(data)[:200])
             await interaction.followup.send(
                 f"Could not get deposit address.\n`{err}`\n\n"
-                "1) Set PLISIO_SECRET_KEY on Vercel\n"
-                "2) Wait for Vercel deploy to succeed\n"
-                f"3) SITE_URL={SITE_URL}",
+                "On Plisio:\n"
+                "• Enable **White-label**\n"
+                "• Create/enable **SOL (Solana)** wallet\n"
+                "• Set PLISIO_SECRET_KEY on Vercel",
                 ephemeral=True,
             )
             return
 
         address = data["address"]
-        currency = data.get("currency", "USDT_TRX")
 
         embed = discord.Embed(
-            title="Deposit USDT (TRC20)",
+            title="Deposit SOL (Solana)",
             description=(
-                f"Send **any amount** of USDT on **Tron (TRC20)** to:\n\n"
+                f"Send **any amount of SOL** to this address:\n\n"
                 f"```{address}```\n\n"
+                f"**Network: Solana only**\n"
                 f"This address is yours permanently.\n"
-                f"Wrong network = lost funds.\n\n"
                 f"Balance updates after Plisio confirms."
             ),
             color=0x2B2D31,
         )
-        embed.set_footer(text=f"{currency} · unique address for your account")
+        embed.set_footer(text="SOL · unique Solana address for your account")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Withdraw", style=discord.ButtonStyle.secondary)

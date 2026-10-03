@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 /**
  * POST /api/plisio/deposit
  * Body: { discordId: string, currency?: string }
- * Returns unique permanent deposit address for that user.
+ * Default currency: SOL (Solana)
  *
- * Plisio docs: GET https://plisio.net/api/v1/shops/deposit/new
+ * Plisio: GET https://plisio.net/api/v1/shops/deposit/new
+ * Requires White-label enabled + SOL wallet on Plisio dashboard.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -19,7 +20,8 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const discordId = String(body.discordId || "");
-    const currency = String(body.currency || "USDT_TRX");
+    // Only Solana
+    const currency = "SOL";
 
     if (!discordId) {
       return NextResponse.json({ error: "discordId required" }, { status: 400 });
@@ -41,15 +43,25 @@ export async function POST(req: NextRequest) {
     if (data.status !== "success" || !data.data) {
       console.error("[Plisio deposit error]", data);
       return NextResponse.json(
-        { error: data.data?.message || data.message || "Plisio error", raw: data },
+        {
+          error:
+            data.data?.message ||
+            data.message ||
+            JSON.stringify(data.data || data) ||
+            "Plisio error",
+          raw: data,
+        },
         { status: 502 }
       );
     }
 
     const d = data.data;
+    // Plisio returns address as "hash" for deposit API
+    const address = d.hash || d.wallet_hash || d.address || d.wallet;
+
     return NextResponse.json({
-      address: d.wallet_hash || d.address || d.wallet,
-      currency: d.currency || currency,
+      address,
+      currency: d.psys_cid || d.currency || currency,
       qr_code: d.qr_code || null,
       uid: discordId,
       raw: d,
@@ -62,6 +74,6 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   return NextResponse.json({
-    status: "POST { discordId, currency? } — default currency USDT_TRX",
+    status: "POST { discordId } — currency fixed to SOL (Solana)",
   });
 }
