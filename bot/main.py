@@ -97,8 +97,6 @@ ALLOWED_CATEGORY_ID = 1555621407256485918
 
 
 async def category_check(interaction: discord.Interaction) -> bool:
-    if interaction.command and interaction.command.name == "setup":
-        return True
     if getattr(interaction.channel, "category_id", None) == ALLOWED_CATEGORY_ID:
         return True
     await interaction.response.send_message(
@@ -109,31 +107,6 @@ async def category_check(interaction: discord.Interaction) -> bool:
 
 
 bot.tree.interaction_check = category_check
-
-
-@bot.tree.command(name="setup", description="Create the server categories and channels")
-@app_commands.default_permissions(administrator=True)
-@app_commands.checks.has_permissions(administrator=True)
-async def setup(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
-    created = []
-    everyone = guild.default_role
-    for cat_name, channels in LAYOUT.items():
-        category = discord.utils.get(guild.categories, name=cat_name)
-        if category is None:
-            category = await guild.create_category(cat_name)
-            created.append(f"category: {cat_name}")
-        await category.set_permissions(everyone, overwrite=everyone_overwrite())
-        for ch_name, read_only in channels:
-            channel = discord.utils.get(category.text_channels, name=ch_name.lower())
-            if channel is None:
-                channel = await guild.create_text_channel(ch_name, category=category)
-                created.append(f"channel: {ch_name}")
-            await channel.set_permissions(everyone, overwrite=everyone_overwrite(read_only))
-            created.append(f"permissions set: {ch_name}")
-    msg = "Done:\n" + "\n".join(created)
-    await interaction.followup.send(msg, ephemeral=True)
 
 
 DICE_IMAGE_URL = "https://i.imgur.com/jNKCFwO.png"
@@ -544,27 +517,6 @@ async def bal(interaction: discord.Interaction, user: discord.Member = None):
         await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="daily", description="Claim your free daily dice")
-async def daily(interaction: discord.Interaction):
-    uid = interaction.user.id
-    _, last = get_user(uid)
-    now = time.time()
-    if now - last < DAILY_COOLDOWN:
-        left = int(DAILY_COOLDOWN - (now - last))
-        h, m = left // 3600, (left % 3600) // 60
-        await interaction.response.send_message(
-            f"Come back in {h}h {m}m for your next daily.", ephemeral=True
-        )
-        return
-    add_balance(uid, DAILY_AMOUNT)
-    db.execute("UPDATE users SET last_daily=? WHERE id=?", (now, uid))
-    db.commit()
-    await interaction.response.send_message(
-        f"You claimed {dice_emoji(interaction.guild)} {DAILY_AMOUNT:,.2f} dices!"
-    )
-
-
-
 
 
 # ========================================================
@@ -923,7 +875,7 @@ async def tip(
     await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
 
-@bot.tree.command(name="clearall", description="[Admin] Reset ALL user balances to 0")
+@bot.tree.command(name="clearall", description="Reset ALL user balances to 0")
 @app_commands.default_permissions(administrator=True)
 async def clearall(interaction: discord.Interaction):
     cur = db.execute("SELECT COUNT(*) FROM users WHERE balance != 0 OR promo_balance != 0 OR wager_required != 0")
@@ -936,6 +888,43 @@ async def clearall(interaction: discord.Interaction):
         color=0xFF0000,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="add", description="Add gambable balance to a user")
+@app_commands.describe(
+    user="The user to give balance to",
+    amount="Amount of dices to add",
+)
+async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount: float):
+    if interaction.user.id != ALLOWED_TIPPER_ID:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    if amount <= 0:
+        await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
+        return
+
+    # Add as promo (gambable only — cannot withdraw or tip)
+    add_balance(user.id, amount, is_promo=True)
+
+    _, _, promo_new, _ = get_user(user.id)
+
+    try:
+        embed = discord.Embed(
+            title="Balance Added!",
+            description=f"You received **{amount:,.2f}** gambable dices!\nYour gambable balance: **{promo_new:,.2f}** dices\n*(This balance can be played but not withdrawn or tipped)*",
+            color=0x2B2D31,
+        )
+        await user.send(embed=embed)
+    except Exception as e:
+        print(f"[Add DM Error] Could not DM user {user.id}: {e}")
+
+    confirm_embed = discord.Embed(
+        title="Balance Added!",
+        description=f"Added **{amount:,.2f}** gambable dices to {user.mention}.",
+        color=0x2B2D31,
+    )
+    await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
 
 async def run_bot_and_server():
