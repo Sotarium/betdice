@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { queueDeposit } from "../pending-deposits/route";
+import { queueDeposit } from "@/lib/depositQueue";
 
 /**
  * Plisio webhook – set Status URL in Plisio dashboard to:
