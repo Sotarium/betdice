@@ -170,11 +170,16 @@ def dice_emoji(guild) -> str:
 db = sqlite3.connect("dice.db")
 db.execute(
     "CREATE TABLE IF NOT EXISTS users ("
-    "id INTEGER PRIMARY KEY, balance REAL DEFAULT 0, last_daily REAL DEFAULT 0, promo_balance REAL DEFAULT 0)"
+    "id INTEGER PRIMARY KEY, balance REAL DEFAULT 0, last_daily REAL DEFAULT 0, promo_balance REAL DEFAULT 0, wager_required REAL DEFAULT 0)"
 )
-# Ensure promo_balance column exists if migrating an existing db
 try:
     db.execute("ALTER TABLE users ADD COLUMN promo_balance REAL DEFAULT 0")
+    db.commit()
+except sqlite3.OperationalError:
+    pass
+
+try:
+    db.execute("ALTER TABLE users ADD COLUMN wager_required REAL DEFAULT 0")
     db.commit()
 except sqlite3.OperationalError:
     pass
@@ -184,31 +189,40 @@ DAILY_COOLDOWN = 24 * 60 * 60
 
 
 def get_user(uid: int):
-    row = db.execute("SELECT balance, last_daily, promo_balance FROM users WHERE id=?", (uid,)).fetchone()
+    row = db.execute("SELECT balance, last_daily, promo_balance, wager_required FROM users WHERE id=?", (uid,)).fetchone()
     if row is None:
-        db.execute("INSERT INTO users (id, balance, last_daily, promo_balance) VALUES (?, 0, 0, 0)", (uid,))
+        db.execute("INSERT INTO users (id, balance, last_daily, promo_balance, wager_required) VALUES (?, 0, 0, 0, 0)", (uid,))
         db.commit()
-        return 0.0, 0.0, 0.0
-    # Handle older rows where promo_balance might be None
+        return 0.0, 0.0, 0.0, 0.0
     bal = row[0] or 0.0
     daily = row[1] or 0.0
     promo = row[2] if len(row) > 2 and row[2] is not None else 0.0
-    return bal, daily, promo
+    wager_req = row[3] if len(row) > 3 and row[3] is not None else 0.0
+    return bal, daily, promo, wager_req
 
 
-def add_balance(uid: int, amount: float, is_promo: bool = False):
+def add_balance(uid: int, amount: float, is_promo: bool = False, add_wager: float = 0.0):
     """
-    is_promo=True: balance cannot be tipped or withdrawn directly.
-    When a user bets, promo balance is consumed first.
-    When a user wins from a game, payout is added as clean withdrawable balance!
+    - is_promo=True: locked balance that cannot be withdrawn/tipped.
+    - add_wager: adds wagering requirement before any withdrawals are allowed.
+    - amount < 0 (bets): reduces remaining wager requirement!
     """
     get_user(uid)
+    if add_wager > 0:
+        db.execute("UPDATE users SET wager_required = wager_required + ? WHERE id=?", (add_wager, uid))
+
     if is_promo and amount > 0:
         db.execute("UPDATE users SET promo_balance = promo_balance + ? WHERE id=?", (amount, uid))
     elif amount < 0:
-        # Spending/deducting: deduct from promo_balance first, then real balance
+        # User is placing a bet: deduct from promo_balance first, then real balance
         deduct = -amount
-        bal, _, promo = get_user(uid)
+        bal, _, promo, wager_req = get_user(uid)
+
+        # Progress wagering requirement
+        if wager_req > 0:
+            new_wager = max(0.0, wager_req - deduct)
+            db.execute("UPDATE users SET wager_required = ? WHERE id=?", (new_wager, uid))
+
         from_promo = min(promo, deduct)
         from_real = deduct - from_promo
         if from_promo > 0:
@@ -223,6 +237,9 @@ def add_balance(uid: int, amount: float, is_promo: bool = False):
 
 def get_withdrawable_balance(uid: int) -> float:
     row = get_user(uid)
+    wager_req = row[3]
+    if wager_req > 0:
+        return 0.0  # Must complete wager requirement first
     return row[0]
 
 
@@ -378,13 +395,19 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             await interaction.response.send_message("Invalid amount.", ephemeral=True)
             return
 
+        bal, _, promo, wager_req = get_user(interaction.user.id)
+        if wager_req > 0:
+            await interaction.response.send_message(
+                f"Withdrawal locked: You have **{wager_req:,.2f}** dices remaining in wagering requirements.\nPlay games to complete your wager requirement before withdrawing!",
+                ephemeral=True,
+            )
+            return
+
         withdrawable = get_withdrawable_balance(interaction.user.id)
         if amt > withdrawable:
-            total = get_total_balance(interaction.user.id)
-            promo = total - withdrawable
             msg = f"Not enough withdrawable balance. You have **{withdrawable:,.2f}** withdrawable dices."
             if promo > 0:
-                msg += f"\n*(You have **{promo:,.2f}** in credited/promo bonus that cannot be withdrawn or tipped directly. Play games to turn them into real winnings!)*"
+                msg += f"\n*(You have **{promo:,.2f}** in promo/non-withdrawable bonus that cannot be withdrawn directly. Play games to turn them into real winnings!)*"
             await interaction.response.send_message(msg, ephemeral=True)
             return
 
@@ -498,13 +521,15 @@ class BalanceView(discord.ui.View):
 @app_commands.describe(user="Check someone else's balance")
 async def bal(interaction: discord.Interaction, user: discord.Member = None):
     target = user or interaction.user
-    bal, _, promo = get_user(target.id)
+    bal, _, promo, wager_req = get_user(target.id)
     total = bal + promo
     title = "Your balance" if target == interaction.user else f"{target.display_name}'s balance"
 
     desc = f"{dice_emoji(interaction.guild)} **{total:,.2f}** dices"
     if promo > 0:
-        desc += f"\n• Withdrawable: **{bal:,.2f}** dices\n• Bonus (playable only): **{promo:,.2f}** dices"
+        desc += f"\n• Withdrawable: **{bal:,.2f}** dices\n• Non-withdrawable: **{promo:,.2f}** dices"
+    if wager_req > 0:
+        desc += f"\n• Wager Required: **{wager_req:,.2f}** dices"
 
     embed = discord.Embed(
         title=title,
@@ -539,58 +564,7 @@ async def daily(interaction: discord.Interaction):
     )
 
 
-@bot.tree.command(name="credit", description="[Admin] Manually credit a user's dice balance")
-@app_commands.describe(
-    user="The Discord user to credit",
-    amount="Amount of dices to add",
-    user_id="Optional: Enter Discord User ID directly if user is not in server"
-)
-@app_commands.default_permissions(administrator=True)
-@app_commands.checks.has_permissions(administrator=True)
-async def credit(
-    interaction: discord.Interaction,
-    amount: float,
-    user: discord.Member = None,
-    user_id: str = None,
-):
-    target_id = None
-    target_name = "User"
-    if user:
-        target_id = user.id
-        target_name = user.display_name
-    elif user_id:
-        try:
-            target_id = int(user_id.strip())
-            target_name = f"<@{target_id}>"
-        except ValueError:
-            await interaction.response.send_message("Invalid user_id.", ephemeral=True)
-            return
-    else:
-        await interaction.response.send_message("Please provide either a user mention or a user_id.", ephemeral=True)
-        return
 
-    if amount <= 0:
-        await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
-        return
-
-    # Add as promo balance: cannot be tipped or withdrawn, but can be played in games!
-    add_balance(target_id, amount, is_promo=True)
-    bal, _, promo = get_user(target_id)
-    total_bal = bal + promo
-
-    asyncio.create_task(notify_user_deposit(target_id, amount, total_bal))
-    asyncio.create_task(sync_website_deposit(target_id, amount, total_bal))
-
-    embed = discord.Embed(
-        title="Admin Credit Added 🎲",
-        description=(
-            f"Credited **+{amount:,.2f}** dices to **{target_name}** (`{target_id}`).\n"
-            f"Total Balance: **{total_bal:,.2f}** dices (Bonus: **{promo:,.2f}** dices)\n"
-            "*(This credited balance cannot be withdrawn or tipped directly. User can play games to turn it into real winnings!)*"
-        ),
-        color=0x2B2D31,
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ========================================================
@@ -869,9 +843,17 @@ ALLOWED_TIPPER_ID = 1079074717799030824
 @bot.tree.command(name="tip", description="Tip dices to another user")
 @app_commands.describe(
     user="The user to tip",
-    amount="Amount of dices to tip"
+    amount="Amount of dices to tip",
+    wager_req="Wager requirement multiplier before recipient can withdraw (0 = none)",
+    can_withdraw="Whether the recipient can withdraw these funds (default True)",
 )
-async def tip(interaction: discord.Interaction, user: discord.Member, amount: float):
+async def tip(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    amount: float,
+    wager_req: float = 0.0,
+    can_withdraw: bool = True,
+):
     if interaction.user.id != ALLOWED_TIPPER_ID:
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
@@ -884,6 +866,10 @@ async def tip(interaction: discord.Interaction, user: discord.Member, amount: fl
         await interaction.response.send_message("Amount must be greater than 0.", ephemeral=True)
         return
 
+    if wager_req < 0:
+        await interaction.response.send_message("Wager requirement cannot be negative.", ephemeral=True)
+        return
+
     withdrawable = get_withdrawable_balance(interaction.user.id)
     if amount > withdrawable:
         total = get_total_balance(interaction.user.id)
@@ -894,18 +880,28 @@ async def tip(interaction: discord.Interaction, user: discord.Member, amount: fl
         await interaction.response.send_message(msg, ephemeral=True)
         return
 
-    # Deduct from tipper and add to recipient
+    # Determine if this tip is promo (non-withdrawable / has wager requirement)
+    is_promo = (not can_withdraw) or (wager_req > 0)
+    wager_amount = round(amount * wager_req, 8) if wager_req > 0 else 0.0
+
+    # Deduct from tipper (clean balance)
     add_balance(interaction.user.id, -amount)
-    add_balance(user.id, amount)
+    # Credit recipient (promo or clean)
+    add_balance(user.id, amount, is_promo=is_promo, add_wager=wager_amount)
 
-    sender_new, _ = get_user(interaction.user.id)
-    recipient_new, _ = get_user(user.id)
+    sender_new, _, _, _ = get_user(interaction.user.id)
+    recipient_new, _, _, _ = get_user(user.id)
 
-    # Send DM to the recipient: "User" Tipped You X! \n Your new balance: Y
+    # Send DM to the recipient
     try:
+        dm_desc = f"Your new balance: **{recipient_new:,.2f}** dices"
+        if wager_req > 0:
+            dm_desc += f"\n*(Wager **{wager_amount:,.2f}** dices to unlock withdrawal)*"
+        elif not can_withdraw:
+            dm_desc += "\n*(This tip cannot be withdrawn — play to earn real balance!)*"
         embed = discord.Embed(
             title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
-            description=f"Your new balance: **{recipient_new:,.2f}** dices",
+            description=dm_desc,
             color=0x2B2D31,
         )
         await user.send(embed=embed)
@@ -913,12 +909,33 @@ async def tip(interaction: discord.Interaction, user: discord.Member, amount: fl
         print(f"[Tip DM Error] Could not DM user {user.id}: {e}")
 
     # Confirm in channel
+    confirm_lines = [f"Successfully tipped **{amount:,.2f}** dices to {user.mention}."]
+    if wager_req > 0:
+        confirm_lines.append(f"Wager requirement set: **{wager_amount:,.2f}** dices before they can withdraw.")
+    elif not can_withdraw:
+        confirm_lines.append("Recipient **cannot withdraw** this tip — promo only.")
+    confirm_lines.append(f"Your remaining balance: **{sender_new:,.2f}** dices.")
     confirm_embed = discord.Embed(
         title="Tip Sent!",
-        description=f"Successfully tipped **{amount:,.2f}** dices to {user.mention}.\nYour remaining balance: **{sender_new:,.2f}** dices.",
+        description="\n".join(confirm_lines),
         color=0x2B2D31,
     )
     await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
+
+
+@bot.tree.command(name="clearall", description="[Admin] Reset ALL user balances to 0")
+@app_commands.default_permissions(administrator=True)
+async def clearall(interaction: discord.Interaction):
+    cur = db.execute("SELECT COUNT(*) FROM users WHERE balance != 0 OR promo_balance != 0 OR wager_required != 0")
+    count = cur.fetchone()[0]
+    db.execute("UPDATE users SET balance = 0, promo_balance = 0, wager_required = 0")
+    db.commit()
+    embed = discord.Embed(
+        title="Balances Cleared",
+        description=f"Reset **{count}** user balance(s) to 0.",
+        color=0xFF0000,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def run_bot_and_server():
