@@ -330,12 +330,15 @@ async def start_http_server():
     print(f"[Bot Webhook] HTTP listener running on port {BOT_PORT}")
 
 
-async def get_deposit_address(discord_id: int, username: str, avatar_hash):
+async def get_deposit_address(discord_id: int, username: str, avatar_hash, currency: str = None):
     import aiohttp
+    payload = {"discordId": str(discord_id)}
+    if currency:
+        payload["currency"] = currency.upper()
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{SITE_URL}/api/plisio/deposit",
-            json={"discordId": str(discord_id)},  # SOL + LTC
+            json=payload,
             timeout=aiohttp.ClientTimeout(total=20),
         ) as r:
             text = await r.text()
@@ -467,6 +470,79 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+async def send_deposit_dm(user: discord.User, currency: str):
+    """Fetch deposit address for one currency and DM it to the user."""
+    try:
+        status, data = await get_deposit_address(user.id, user.name,
+                                                  user.avatar.key if user.avatar else None,
+                                                  currency=currency)
+    except Exception as e:
+        await user.send(f"Network error fetching deposit address: `{e}`")
+        return
+
+    addresses = data.get("addresses") or []
+    if not addresses and data.get("address"):
+        addresses = [{"address": data["address"], "currency": data.get("currency", currency), "min_sum": 0}]
+
+    if status != 200 or not addresses:
+        err = data.get("error", str(data)[:200])
+        await user.send(f"Could not get deposit address.\n`{err}`")
+        return
+
+    a = addresses[0]
+    cur = (a.get("currency") or currency).upper()
+    addr = a.get("address") or "?"
+    min_s = a.get("min_sum") or 0
+    cur_label = "Solana (SOL)" if cur == "SOL" else "Litecoin (LTC)" if cur == "LTC" else cur
+
+    embed = discord.Embed(
+        title="Deposit",
+        description=(
+            f"**{cur_label}**\n"
+            f"```{addr}```\n"
+            + (f"Min deposit: **${min_s:.2f}** USD\n\n" if min_s and min_s > 0 else "\n")
+            + "Deposits below the minimum are not processed.\n"
+            "Wrong network = lost funds.\n"
+            "Balance updates after Plisio confirms."
+        ),
+        color=0x2B2D31,
+    )
+    embed.set_footer(text="This is your permanent deposit address")
+    try:
+        await user.send(embed=embed)
+    except discord.Forbidden:
+        pass  # DMs disabled — caller handles this
+
+
+class DepositCoinView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+
+    async def _handle(self, interaction: discord.Interaction, currency: str):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your balance.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await send_deposit_dm(interaction.user, currency)
+            await interaction.followup.send(
+                f"Deposit address sent to your DMs.", ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "Could not DM you. Please enable DMs from server members.", ephemeral=True
+            )
+
+    @discord.ui.button(label="Solana", style=discord.ButtonStyle.primary)
+    async def sol(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle(interaction, "SOL")
+
+    @discord.ui.button(label="Litecoin", style=discord.ButtonStyle.secondary)
+    async def ltc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle(interaction, "LTC")
+
+
 class BalanceView(discord.ui.View):
     def __init__(self, target_id: int):
         super().__init__(timeout=180)
@@ -477,62 +553,16 @@ class BalanceView(discord.ui.View):
         if interaction.user.id != self.target_id:
             await interaction.response.send_message("This is not your balance.", ephemeral=True)
             return
-
-        await interaction.response.defer(ephemeral=True)
-
-        avatar_hash = interaction.user.avatar.key if interaction.user.avatar else None
-        try:
-            status, data = await get_deposit_address(
-                interaction.user.id,
-                interaction.user.name,
-                avatar_hash,
-            )
-        except Exception as e:
-            await interaction.followup.send(f"Network error: `{e}`", ephemeral=True)
-            return
-
-        addresses = data.get("addresses") or []
-        if status != 200 or (not addresses and not data.get("address")):
-            err = data.get("error", str(data)[:200])
-            await interaction.followup.send(
-                f"Could not get deposit address.\n`{err}`\n\n"
-                "On Plisio:\n"
-                "• Enable **White-label**\n"
-                "• Create **SOL** and **LTC** wallets\n"
-                "• Set PLISIO_SECRET_KEY on Vercel",
-                ephemeral=True,
-            )
-            return
-
-        if not addresses and data.get("address"):
-            addresses = [{"address": data["address"], "currency": data.get("currency", "?"), "min_sum": 0}]
-
-        lines = []
-        for a in addresses:
-            cur = (a.get("currency") or "?").upper()
-            addr = a.get("address") or "?"
-            min_s = a.get("min_sum") or 0
-            min_str = f"\nMin deposit: **${min_s:.2f}** USD" if min_s and min_s > 0 else ""
-            if cur == "SOL":
-                lines.append(f"**Solana (SOL)**{min_str}\n```{addr}```")
-            elif cur == "LTC":
-                lines.append(f"**Litecoin (LTC)**{min_str}\n```{addr}```")
-            else:
-                lines.append(f"**{cur}**{min_str}\n```{addr}```")
-
         embed = discord.Embed(
             title="Deposit",
-            description=(
-                "Send to your permanent deposit address:\n\n"
-                + "\n\n".join(lines)
-                + "\n\nDeposits below the minimum are not processed.\n"
-                "Wrong network = lost funds.\n"
-                "Balance updates after Plisio confirms."
-            ),
+            description="Which network do you want to deposit with?",
             color=0x2B2D31,
         )
-        embed.set_footer(text="Unique addresses for your account · SOL + LTC")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.response.send_message(
+            embed=embed,
+            view=DepositCoinView(interaction.user.id),
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="Withdraw", style=discord.ButtonStyle.secondary)
     async def withdraw(self, interaction: discord.Interaction, button: discord.ui.Button):
