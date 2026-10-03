@@ -192,7 +192,7 @@ async def get_deposit_address(discord_id: int, username: str, avatar_hash):
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{SITE_URL}/api/plisio/deposit",
-            json={"discordId": str(discord_id)},
+            json={"discordId": str(discord_id)},  # SOL + LTC
             timeout=aiohttp.ClientTimeout(total=20),
         ) as r:
             text = await r.text()
@@ -202,7 +202,7 @@ async def get_deposit_address(discord_id: int, username: str, avatar_hash):
             except Exception:
                 data = {"error": text[:300]}
 
-        if status == 200 and data.get("address"):
+        if status == 200 and (data.get("addresses") or data.get("address")):
             try:
                 await session.post(
                     f"{SITE_URL}/api/users/sync",
@@ -233,8 +233,8 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
         max_length=12,
     )
     address = discord.ui.TextInput(
-        label="Your Solana wallet address",
-        placeholder="Paste your SOL address",
+        label="Your wallet address (SOL or LTC)",
+        placeholder="Paste SOL or LTC address",
         required=True,
         min_length=10,
         max_length=128,
@@ -283,8 +283,8 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             title="Withdraw requested",
             description=(
                 f"**Amount:** {amt:,.2f} dices\n"
-                f"**Solana address:** `{self.address.value}`\n\n"
-                "Balance deducted. SOL payout will be processed."
+                f"**Address:** `{self.address.value}`\n\n"
+                "Balance deducted. Payout will be processed."
             ),
             color=0x2B2D31,
         )
@@ -315,32 +315,44 @@ class BalanceView(discord.ui.View):
             await interaction.followup.send(f"Network error: `{e}`", ephemeral=True)
             return
 
-        if status != 200 or not data.get("address"):
+        addresses = data.get("addresses") or []
+        if status != 200 or (not addresses and not data.get("address")):
             err = data.get("error", str(data)[:200])
             await interaction.followup.send(
                 f"Could not get deposit address.\n`{err}`\n\n"
                 "On Plisio:\n"
                 "• Enable **White-label**\n"
-                "• Create/enable **SOL (Solana)** wallet\n"
+                "• Create **SOL** and **LTC** wallets\n"
                 "• Set PLISIO_SECRET_KEY on Vercel",
                 ephemeral=True,
             )
             return
 
-        address = data["address"]
+        if not addresses and data.get("address"):
+            addresses = [{"address": data["address"], "currency": data.get("currency", "?")}]
+
+        lines = []
+        for a in addresses:
+            cur = (a.get("currency") or "?").upper()
+            addr = a.get("address") or "?"
+            if cur == "SOL":
+                lines.append(f"**Solana (SOL)**\n```{addr}```")
+            elif cur == "LTC":
+                lines.append(f"**Litecoin (LTC)**\n```{addr}```")
+            else:
+                lines.append(f"**{cur}**\n```{addr}```")
 
         embed = discord.Embed(
-            title="Deposit SOL (Solana)",
+            title="Deposit",
             description=(
-                f"Send **any amount of SOL** to this address:\n\n"
-                f"```{address}```\n\n"
-                f"**Network: Solana only**\n"
-                f"This address is yours permanently.\n"
-                f"Balance updates after Plisio confirms."
+                "Send **any amount** to your permanent address:\n\n"
+                + "\n\n".join(lines)
+                + "\n\nWrong network = lost funds.\n"
+                "Balance updates after Plisio confirms."
             ),
             color=0x2B2D31,
         )
-        embed.set_footer(text="SOL · unique Solana address for your account")
+        embed.set_footer(text="Unique addresses for your account · SOL + LTC")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Withdraw", style=discord.ButtonStyle.secondary)

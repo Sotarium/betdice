@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 /**
  * POST /api/plisio/deposit
- * Body: { discordId: string, currency?: string }
- * Default currency: SOL (Solana)
+ * Body: { discordId: string, currency?: "SOL" | "LTC" }
+ * Default: both SOL and LTC addresses returned.
  *
  * Plisio: GET https://plisio.net/api/v1/shops/deposit/new
- * Requires White-label enabled + SOL wallet on Plisio dashboard.
+ * Requires White-label + wallets enabled on Plisio.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -20,8 +20,10 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const discordId = String(body.discordId || "");
-    // Only Solana
-    const currency = "SOL";
+    // Single currency or both
+    const requested = body.currency
+      ? String(body.currency).toUpperCase()
+      : "SOL,LTC";
 
     if (!discordId) {
       return NextResponse.json({ error: "discordId required" }, { status: 400 });
@@ -29,7 +31,7 @@ export async function POST(req: NextRequest) {
 
     const params = new URLSearchParams({
       api_key: apiKey,
-      psys_cid: currency,
+      psys_cid: requested,
       uid: discordId,
     });
 
@@ -55,16 +57,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const d = data.data;
-    // Plisio returns address as "hash" for deposit API
-    const address = d.hash || d.wallet_hash || d.address || d.wallet;
+    // Single object or array
+    const items = Array.isArray(data.data) ? data.data : [data.data];
+
+    const addresses = items.map((d: Record<string, string>) => ({
+      address: d.hash || d.wallet_hash || d.address || d.wallet,
+      currency: d.psys_cid || d.currency,
+    }));
+
+    // Keep backward-compatible single fields (first address)
+    const first = addresses[0] || {};
 
     return NextResponse.json({
-      address,
-      currency: d.psys_cid || d.currency || currency,
-      qr_code: d.qr_code || null,
+      address: first.address,
+      currency: first.currency,
+      addresses,
       uid: discordId,
-      raw: d,
     });
   } catch (e) {
     console.error("[Plisio deposit]", e);
@@ -74,6 +82,6 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   return NextResponse.json({
-    status: "POST { discordId } — currency fixed to SOL (Solana)",
+    status: 'POST { discordId, currency?: "SOL" | "LTC" } — default both',
   });
 }
