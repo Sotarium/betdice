@@ -36,8 +36,24 @@ export async function POST(req: NextRequest) {
 
     const cur = currency.toUpperCase();
 
-    // 1. Fetch current exchange rate to convert USD (dices) -> crypto amount
+    // 1. Check actual Plisio wallet balance
+    let actualWalletBalance = 0;
+    try {
+      const balRes = await fetch(
+        `https://api.plisio.net/api/v1/balances/${cur}?api_key=${apiKey}`,
+        { method: "GET" }
+      );
+      const balData = await balRes.json();
+      if (balData.status === "success" && balData.data?.balance) {
+        actualWalletBalance = parseFloat(balData.data.balance);
+      }
+    } catch (e) {
+      console.warn("[Withdraw] Balance check error:", e);
+    }
+
+    // 2. Fetch current exchange rate to convert USD (dices) -> crypto amount
     let cryptoAmount = amount;
+    let coinPrice = 1;
     try {
       const rateRes = await fetch(
         `https://api.plisio.net/api/v1/currencies/USD?api_key=${apiKey}`,
@@ -49,16 +65,25 @@ export async function POST(req: NextRequest) {
           (c: any) => c.currency === cur || c.psys_cid === cur
         );
         if (coin && coin.price_usd && parseFloat(coin.price_usd) > 0) {
-          const price = parseFloat(coin.price_usd);
-          // e.g. 0.80 USD / 140 USD per SOL = 0.005714 SOL
-          cryptoAmount = amount / price;
-          // Trim to appropriate decimals (8 decimals standard)
-          cryptoAmount = parseFloat(cryptoAmount.toFixed(8));
-          console.log(`[Withdraw] ${amount} USD converted to ${cryptoAmount} ${cur} (Rate: $${price})`);
+          coinPrice = parseFloat(coin.price_usd);
+          cryptoAmount = amount / coinPrice;
+          // Trim to 6 decimal places for blockchain safety
+          cryptoAmount = parseFloat(cryptoAmount.toFixed(6));
         }
       }
     } catch (e) {
-      console.warn("[Withdraw] Rate fetch failed, using original amount:", e);
+      console.warn("[Withdraw] Rate fetch failed:", e);
+    }
+
+    // If requested crypto amount exceeds available balance (including network fee buffer)
+    if (actualWalletBalance > 0 && cryptoAmount > actualWalletBalance) {
+      const availableUsd = (actualWalletBalance * coinPrice).toFixed(2);
+      return NextResponse.json(
+        {
+          error: `Insufficient hot-wallet balance on Plisio. Available: ${actualWalletBalance.toFixed(6)} ${cur} (~$${availableUsd} USD). Requested: ${cryptoAmount.toFixed(6)} ${cur} ($${amount.toFixed(2)} USD).`,
+        },
+        { status: 400 }
+      );
     }
 
     const params = new URLSearchParams({
@@ -66,6 +91,7 @@ export async function POST(req: NextRequest) {
       currency: cur,
       to: to.trim(),
       amount: String(cryptoAmount),
+      feePlan: "normal",
       type: "cash_out",
     });
 
