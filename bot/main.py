@@ -161,7 +161,92 @@ db.execute(
     "CREATE TABLE IF NOT EXISTS transactions ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, amount REAL, balance_after REAL, ts REAL)"
 )
+db.execute(
+    "CREATE TABLE IF NOT EXISTS mines_clicks ("
+    "user_id INTEGER, tile_index INTEGER, count INTEGER DEFAULT 0, "
+    "PRIMARY KEY (user_id, tile_index))"
+)
 db.commit()
+
+
+def record_mines_click(user_id: int, tile_index: int):
+    """Track which tile a player clicked (safe tiles only)."""
+    db.execute(
+        "INSERT INTO mines_clicks (user_id, tile_index, count) VALUES (?, ?, 1) "
+        "ON CONFLICT(user_id, tile_index) DO UPDATE SET count = count + 1",
+        (user_id, tile_index),
+    )
+    db.commit()
+
+
+def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set:
+    """
+    Bias bomb placement based on player click history.
+    - If player has a pattern: bomb is 25% more likely in their top tiles.
+    - If player clicks randomly: 50/50 split between two alternating zones.
+    - If not enough history: pure random.
+    """
+    rows = db.execute(
+        "SELECT tile_index, count FROM mines_clicks WHERE user_id = ? AND tile_index < ?",
+        (user_id, total_tiles),
+    ).fetchall()
+
+    total_clicks = sum(r[1] for r in rows)
+
+    if total_clicks < 10:
+        # Not enough data — pure random
+        return set(random.sample(range(total_tiles), bombs))
+
+    # Build weight array
+    uniform = 1.0 / total_tiles
+    weights = [uniform] * total_tiles
+    for tile_idx, count in rows:
+        freq = count / total_clicks
+        weights[tile_idx] = freq
+
+    # Detect if player has a pattern (high variance) or is random (low variance)
+    avg = sum(weights) / len(weights)
+    variance = sum((w - avg) ** 2 for w in weights) / len(weights)
+    random_threshold = (uniform ** 2) * 0.3  # low variance = random
+
+    if variance <= random_threshold:
+        # Random player — 50/50 between two alternating zones
+        # Zone A: even tile indices (cols 0,2,4 per row)
+        # Zone B: odd tile indices (cols 1,3 per row)
+        zone = random.randint(0, 1)  # 0=even zone, 1=odd zone
+        zone_tiles = [i for i in range(total_tiles) if i % 2 == zone]
+        other_tiles = [i for i in range(total_tiles) if i % 2 != zone]
+        # 60% weight on chosen zone tiles, 40% on others
+        biased_weights = []
+        for i in range(total_tiles):
+            if i in zone_tiles:
+                biased_weights.append(0.6 / len(zone_tiles))
+            else:
+                biased_weights.append(0.4 / len(other_tiles))
+    else:
+        # Pattern player — boost their top tiles by 25%
+        biased_weights = []
+        for w in weights:
+            if w > uniform:
+                biased_weights.append(w * 1.25)  # 25% boost on preferred tiles
+            else:
+                biased_weights.append(w)
+
+    # Weighted sampling without replacement for bomb positions
+    bomb_positions = set()
+    available = list(range(total_tiles))
+    avail_weights = list(biased_weights)
+    for _ in range(bombs):
+        total_w = sum(avail_weights)
+        norm = [w / total_w for w in avail_weights]
+        chosen = random.choices(available, weights=norm, k=1)[0]
+        idx = available.index(chosen)
+        bomb_positions.add(chosen)
+        available.pop(idx)
+        avail_weights.pop(idx)
+
+    return bomb_positions
+
 
 
 def log_tx(uid: int, tx_type: str, amount: float):
@@ -645,8 +730,8 @@ class MinesView(discord.ui.View):
         self.revealed_indices = set()
         self.game_over = False
 
-        # Random bomb placement among the 20 tiles
-        self.bomb_positions = set(random.sample(range(self.total_tiles), self.bombs))
+        # Biased bomb placement based on player click history
+        self.bomb_positions = get_biased_bomb_positions(user_id, self.total_tiles, self.bombs)
 
         # Build 20 tile buttons across rows 0-3
         for i in range(self.total_tiles):
@@ -749,6 +834,7 @@ class MinesView(discord.ui.View):
 
         # Safe tile found
         self.revealed_indices.add(idx)
+        record_mines_click(self.user_id, idx)  # track click for pattern analysis
         button.style = discord.ButtonStyle.success
         button.label = "\u200b"
         button.disabled = True
