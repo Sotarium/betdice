@@ -241,7 +241,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
     total_clicks = sum(r[1] for r in rows)
 
     if total_clicks < 10:
-        # Not enough data â€” pure random
+        # Not enough data — pure random
         return set(random.sample(range(total_tiles), bombs))
 
     # Build weight array
@@ -257,7 +257,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
     random_threshold = (uniform ** 2) * 0.3  # low variance = random
 
     if variance <= random_threshold:
-        # Random player â€” 50/50 between two alternating zones
+        # Random player — 50/50 between two alternating zones
         # Zone A: even tile indices (cols 0,2,4 per row)
         # Zone B: odd tile indices (cols 1,3 per row)
         zone = random.randint(0, 1)  # 0=even zone, 1=odd zone
@@ -271,7 +271,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
             else:
                 biased_weights.append(0.4 / len(other_tiles))
     else:
-        # Pattern player â€” boost their top tiles by 25%
+        # Pattern player — boost their top tiles by 25%
         biased_weights = []
         for w in weights:
             if w > uniform:
@@ -641,7 +641,7 @@ async def send_deposit_dm(user: discord.User, currency: str):
     try:
         await user.send(embed=embed)
     except discord.Forbidden:
-        pass  # DMs disabled â€” caller handles this
+        pass  # DMs disabled — caller handles this
 
 
 class DepositCoinView(discord.ui.View):
@@ -712,9 +712,9 @@ async def bal(interaction: discord.Interaction, user: discord.Member = None):
 
     desc = f"{dice_emoji(interaction.guild)} **{total:,.2f}** dices"
     if promo > 0:
-        desc += f"\nâ€¢ Withdrawable: **{bal:,.2f}** dices\nâ€¢ Non-withdrawable: **{promo:,.2f}** dices"
+        desc += f"\n• Withdrawable: **{bal:,.2f}** dices\n• Non-withdrawable: **{promo:,.2f}** dices"
     if wager_req > 0:
-        desc += f"\nâ€¢ Wager Required: **{wager_req:,.2f}** dices"
+        desc += f"\n• Wager Required: **{wager_req:,.2f}** dices"
 
     embed = discord.Embed(
         title=title,
@@ -771,9 +771,8 @@ class MinesView(discord.ui.View):
         self.bet_amount = bet_amount
         self.bombs = bombs
         self.grid_size = 5
-        # 24 tiles across rows 0-4, cashout centered in row 4
-        # Row 4 layout: [tile20][tile21][CASHOUT][tile22][tile23]
-        self.total_tiles = 24
+        # 20 tiles across rows 0-3 (5 per row), cashout alone in row 4
+        self.total_tiles = 20
         self.safe_tiles = self.total_tiles - bombs
         self.revealed_indices = set()
         self.game_over = False
@@ -781,26 +780,21 @@ class MinesView(discord.ui.View):
         # Biased bomb placement based on player click history
         self.bomb_positions = get_biased_bomb_positions(user_id, self.total_tiles, self.bombs)
 
-        # Build tiles 0-21 normally (rows 0-3 + first 2 of row 4)
-        for i in range(22):
+        # Build 20 tiles across rows 0-3 (5 per row)
+        for i in range(20):
             row = i // 5
             btn = MinesButton(index=i, row=row)
             self.add_item(btn)
 
-        # Cashout button centered in row 4 (position 2 of 5)
+        # Cashout button alone in row 4 (appears below the full grid)
         self.cashout_btn = discord.ui.Button(
             label="Cashout (0.00)",
-            style=discord.ButtonStyle.success,
+            style=discord.ButtonStyle.secondary,
             disabled=True,
             row=4,
         )
         self.cashout_btn.callback = self.handle_cashout
         self.add_item(self.cashout_btn)
-
-        # Tiles 22 and 23 go after cashout in row 4
-        for i in range(22, 24):
-            btn = MinesButton(index=i, row=4)
-            self.add_item(btn)
 
 
     @property
@@ -827,7 +821,7 @@ class MinesView(discord.ui.View):
             embed = discord.Embed(
                 title="Cashed Out",
                 description=(
-                    f"**{self.current_multiplier:.2f}x** â€” +{cashout_amt:,.2f} dices"
+                    f"**{self.current_multiplier:.2f}x** — +{cashout_amt:,.2f} dices"
                 ),
                 color=0x0498fb,
             )
@@ -835,7 +829,7 @@ class MinesView(discord.ui.View):
             embed = discord.Embed(
                 title="Board Cleared",
                 description=(
-                    f"**{self.current_multiplier:.2f}x** â€” +{cashout_amt:,.2f} dices"
+                    f"**{self.current_multiplier:.2f}x** — +{cashout_amt:,.2f} dices"
                 ),
                 color=0x0498fb,
             )
@@ -843,7 +837,7 @@ class MinesView(discord.ui.View):
             embed = discord.Embed(
                 title="Bomb Hit",
                 description=(
-                    f"Lost **{self.bet_amount:,.2f}** dices Â· {revealed_count} tiles cleared"
+                    f"Lost **{self.bet_amount:,.2f}** dices · {revealed_count} tiles cleared"
                 ),
                 color=0x0498fb,
             )
@@ -1055,7 +1049,7 @@ async def tip(
         if wager_req > 0:
             dm_desc += f"\n*(Wager **{wager_amount:,.2f}** dices to unlock withdrawal)*"
         elif not can_withdraw:
-            dm_desc += "\n*(This tip cannot be withdrawn â€” play to earn real balance!)*"
+            dm_desc += "\n*(This tip cannot be withdrawn — play to earn real balance!)*"
         embed = discord.Embed(
             title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
             description=dm_desc,
@@ -1070,7 +1064,7 @@ async def tip(
     if wager_req > 0:
         confirm_lines.append(f"Wager requirement set: **{wager_amount:,.2f}** dices before they can withdraw.")
     elif not can_withdraw:
-        confirm_lines.append("Recipient **cannot withdraw** this tip â€” promo only.")
+        confirm_lines.append("Recipient **cannot withdraw** this tip — promo only.")
     confirm_lines.append(f"Your remaining balance: **{sender_new:,.2f}** dices.")
     confirm_embed = discord.Embed(
         title="Tip Sent!",
@@ -1112,7 +1106,7 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
     await interaction.response.defer(ephemeral=True)
 
     try:
-        # Add as real clean balance â€” fully withdrawable and tippable
+        # Add as real clean balance — fully withdrawable and tippable
         add_balance(user.id, amount, tx_type="deposit")
 
         new_bal, _, _, _ = get_user(user.id)
@@ -1175,174 +1169,237 @@ async def remove_cmd(interaction: discord.Interaction, user: discord.Member, amo
     await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
 
+def build_profit_html(username: str, avatar_url: str, balance: float,
+                      history: list, chart_points: list, chart_labels: list) -> str:
+    import json
+    BUX_TO_USD = 0.002
+
+    # Compute stats
+    total_profit = sum(r["amount"] for r in history if r["type"] in ("Win", "Deposit"))
+    total_profit_usd = round(total_profit * BUX_TO_USD, 2)
+    total_profit_bux = round(total_profit, 2)
+    now_ms = int(time.time() * 1000)
+    day_ms = 86400 * 1000
+    profit_24h = sum(r["amount"] for r in history
+                     if r["type"] in ("Win", "Deposit") and (now_ms - r["timestamp_ms"]) < day_ms)
+    profit_24h_usd = round(profit_24h * BUX_TO_USD, 2)
+    profit_24h_bux = round(profit_24h, 2)
+    balance_bux = round(balance, 2)
+
+    data = json.dumps({
+        "username": username,
+        "avatar": avatar_url,
+        "total_earnings_bux": total_profit_bux,
+        "total_earnings_usd": total_profit_usd,
+        "earnings_24h_bux": profit_24h_bux,
+        "earnings_24h_usd": profit_24h_usd,
+        "current_balance_bux": balance_bux,
+        "history": history,
+        "chart_points": chart_points,
+        "chart_labels": chart_labels,
+    })
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Profit — {username}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}}
+body{{background:#0a0a0c;color:#f5f5f7;min-height:100vh;display:flex;align-items:flex-start;justify-content:center}}
+.fomo-page{{width:1180px;padding:24px 24px 40px;display:flex;flex-direction:column;gap:20px}}
+.fomo-banner{{width:100%;height:110px;background:#12111a;border-radius:12px;margin-bottom:-28px;position:relative;z-index:1}}
+.fomo-profile-row{{display:flex;align-items:flex-end;gap:16px;padding:0 8px;margin-top:8px;position:relative;z-index:2}}
+.fomo-avatar{{width:80px;height:80px;border-radius:50%;border:3px solid #0a0a0c;object-fit:cover;background:#1d1c2d}}
+.fomo-profile-info{{display:flex;flex-direction:column;gap:4px;padding-bottom:8px}}
+.fomo-username{{font-size:22px;font-weight:700;color:#f5f5f7}}
+.fomo-handle{{font-size:13px;color:#6b6b80}}
+.stats-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}}
+.stat-card{{background:#12111a;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:6px;border:1px solid rgba(255,255,255,0.06)}}
+.stat-label{{font-size:11px;font-weight:600;color:#6b6b80;text-transform:uppercase;letter-spacing:.05em}}
+.stat-value{{font-size:22px;font-weight:700;color:#f5f5f7;line-height:1}}
+.stat-sub{{font-size:12px;color:#4b4b60}}
+.chart-card{{background:#12111a;border-radius:12px;padding:20px;border:1px solid rgba(255,255,255,0.06)}}
+.chart-title{{font-size:13px;font-weight:600;color:#9090a0;margin-bottom:14px}}
+.chart-wrap{{height:180px;position:relative}}
+.history-card{{background:#12111a;border-radius:12px;padding:20px;border:1px solid rgba(255,255,255,0.06)}}
+.history-title{{font-size:13px;font-weight:600;color:#9090a0;margin-bottom:14px}}
+table{{width:100%;border-collapse:collapse}}
+th{{font-size:11px;color:#4b4b60;font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:6px 12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.05)}}
+td{{font-size:13px;color:#c5c5d0;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04)}}
+td:last-child{{text-align:right;font-weight:600}}
+.badge{{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase}}
+.badge-deposit{{background:rgba(0,210,90,0.15);color:#00d25a}}
+.badge-win{{background:rgba(4,152,251,0.15);color:#0498fb}}
+.badge-bet,.badge-lose,.badge-lost{{background:rgba(255,60,60,0.12);color:#ff4040}}
+.badge-withdraw{{background:rgba(255,180,0,0.12);color:#ffb400}}
+.pos{{color:#00d25a}}.neg{{color:#ff4040}}
+</style>
+</head>
+<body>
+<div class="fomo-page" id="root"></div>
+<script>
+const D = {data};
+const BUX = 0.002;
+function fmt(n){{return Number(n).toLocaleString('en-US',{{minimumFractionDigits:2,maximumFractionDigits:2}})}}
+function badge(t){{
+  const m={{"Deposit":"deposit","Win":"win","Bet":"bet","Lose":"lose","Lost":"lost","Withdraw":"withdraw"}};
+  const c=m[t]||"bet";
+  return `<span class="badge badge-${{c}}">${{t}}</span>`;
+}}
+const root=document.getElementById('root');
+root.innerHTML=`
+<div class="fomo-banner"></div>
+<div class="fomo-profile-row">
+  <img class="fomo-avatar" src="${{D.avatar}}" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'" alt="avatar"/>
+  <div class="fomo-profile-info">
+    <div class="fomo-username">${{D.username}}</div>
+    <div class="fomo-handle">@${{D.username}}</div>
+  </div>
+</div>
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label">Total Earnings</div>
+    <div class="stat-value">${{fmt(D.total_earnings_bux)}} <span style="font-size:13px;color:#4b4b60">dices</span></div>
+    <div class="stat-sub">≈ \$${{fmt(D.total_earnings_usd)}}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">24h Earnings</div>
+    <div class="stat-value">${{fmt(D.earnings_24h_bux)}} <span style="font-size:13px;color:#4b4b60">dices</span></div>
+    <div class="stat-sub">≈ \$${{fmt(D.earnings_24h_usd)}}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Balance</div>
+    <div class="stat-value">${{fmt(D.current_balance_bux)}} <span style="font-size:13px;color:#4b4b60">dices</span></div>
+    <div class="stat-sub">≈ \$${{fmt(D.current_balance_bux*BUX)}}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Transactions</div>
+    <div class="stat-value">${{D.history.length}}</div>
+    <div class="stat-sub">all time</div>
+  </div>
+</div>
+<div class="chart-card">
+  <div class="chart-title">Balance History</div>
+  <div class="chart-wrap"><canvas id="chart"></canvas></div>
+</div>
+<div class="history-card">
+  <div class="history-title">Recent Transactions</div>
+  <table>
+    <thead><tr><th>Type</th><th>When</th><th>Amount</th><th>Balance After</th></tr></thead>
+    <tbody>${{D.history.filter(r=>r.type==='Deposit'||r.type==='Withdraw').slice(0,8).map(r=>`
+      <tr>
+        <td>${{badge(r.type)}}</td>
+        <td>${{r.when}}</td>
+        <td class="${{r.amount>=0?'pos':'neg'}}">${{r.amount>=0?'+':''}}${{fmt(r.amount)}}</td>
+        <td>${{fmt(r.balance_after)}}</td>
+      </tr>`).join('')}}
+    </tbody>
+  </table>
+</div>`;
+// Chart
+const pts=D.chart_points, lbls=D.chart_labels;
+const isUp=pts.length<2||(pts[pts.length-1]>=pts[0]);
+const lineColor=isUp?'#0498fb':'#ff4040';
+new Chart(document.getElementById('chart'),{{
+  type:'line',
+  data:{{labels:lbls,datasets:[{{data:pts,borderColor:lineColor,borderWidth:2.5,pointRadius:0,tension:0.4,fill:true,backgroundColor:(ctx)=>{{
+    const g=ctx.chart.ctx.createLinearGradient(0,0,0,180);
+    g.addColorStop(0,isUp?'rgba(4,152,251,0.25)':'rgba(255,64,64,0.25)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    return g;
+  }}}}]}},
+  options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}},tooltip:{{enabled:false}}}},
+    scales:{{x:{{display:false}},y:{{display:false}}}}}}
+}});
+</script>
+</body></html>"""
+
+
 async def generate_profit_card(target: discord.Member) -> io.BytesIO:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
-    from matplotlib.patches import FancyBboxPatch
-    import matplotlib.patheffects as pe
-    import numpy as np
-    import aiohttp
-    from PIL import Image as PILImage, ImageDraw, ImageFont, ImageFilter
+    import json, tempfile, os, aiohttp
+    from playwright.async_api import async_playwright
 
     uid = target.id
+    import datetime
 
-    # --- Fetch transaction history ---
+    # Fetch all transactions from SQLite
     rows = db.execute(
-        "SELECT type, amount, balance_after, ts FROM transactions WHERE user_id=? ORDER BY ts ASC",
+        "SELECT type, amount, balance_after, ts FROM transactions WHERE user_id=? ORDER BY ts DESC LIMIT 50",
         (uid,),
     ).fetchall()
-
-    # --- Fetch deposits from transactions (type='deposit') ---
-    deposit_rows = db.execute(
-        "SELECT amount, ts FROM transactions WHERE user_id=? AND type='deposit' ORDER BY ts DESC LIMIT 10",
-        (uid,),
-    ).fetchall()
-
-    # --- Current balance ---
     bal, _, promo, _ = get_user(uid)
-    current_total = bal + promo
+    current_balance = bal + promo
 
-    # --- Build profit line data ---
-    # profit = balance_after - first balance_after (so starts at 0)
-    if rows:
-        times = [r[3] for r in rows]
-        balances = [r[2] for r in rows]
-        # Normalize to profit relative to start
-        start = balances[0]
-        profits = [b - start for b in balances]
-        # Add current point
-        times.append(time.time())
-        profits.append(current_total - start)
+    # Build history list
+    history = []
+    for tx_type, amount, balance_after, ts in rows:
+        dt = datetime.datetime.fromtimestamp(ts)
+        when_str = f"{dt.month}/{dt.day}/{dt.year}, {dt.strftime('%I:%M %p').lstrip('0')}"
+        history.append({
+            "type": tx_type.capitalize(),
+            "amount": round(float(amount), 2),
+            "balance_after": round(float(balance_after), 2),
+            "when": when_str,
+            "timestamp_ms": int(ts * 1000),
+        })
+
+    # Build chart data (up to 12 points from ascending history)
+    chart_rows = db.execute(
+        "SELECT balance_after, ts FROM transactions WHERE user_id=? ORDER BY ts ASC",
+        (uid,),
+    ).fetchall()
+    if chart_rows:
+        step = max(1, len(chart_rows) // 12)
+        sampled = chart_rows[::step][-12:]
+        chart_points = [round(float(r[0]), 2) for r in sampled]
+        chart_labels = [datetime.datetime.fromtimestamp(r[1]).strftime("%I:%M %p").lstrip("0") for r in sampled]
     else:
-        times = [time.time() - 3600, time.time()]
-        profits = [0.0, 0.0]
+        chart_points = [current_balance, current_balance]
+        chart_labels = ["Start", "Now"]
 
-    profit_now = profits[-1]
-    is_positive = profit_now >= 0
-    line_color = "#00e676" if is_positive else "#ff1744"
-    fill_color = "#00e676" if is_positive else "#ff1744"
-    profit_sign = "+" if is_positive else ""
+    # Get Discord avatar URL
+    avatar_url = str(target.display_avatar.replace(size=256, format="png"))
 
-    # --- Download avatar ---
-    avatar_img = None
+    # Generate HTML
+    html = build_profit_html(
+        username=target.display_name,
+        avatar_url=avatar_url,
+        balance=current_balance,
+        history=history,
+        chart_points=chart_points,
+        chart_labels=chart_labels,
+    )
+
+    # Write to temp file and screenshot with Playwright
+    tmp_path = os.path.join(tempfile.gettempdir(), f"profit_{uid}.html")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    file_url = f"file:///{tmp_path.replace(os.sep, '/')}"
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page(viewport={"width": 1230, "height": 900})
+        try:
+            await page.goto(file_url, wait_until="networkidle", timeout=15000)
+            await page.wait_for_selector(".fomo-page", timeout=8000)
+            element = page.locator(".fomo-page")
+            screenshot = await element.screenshot()
+        finally:
+            await browser.close()
+
     try:
-        avatar_url = str(target.display_avatar.replace(size=128, format="png"))
-        async with aiohttp.ClientSession() as session:
-            async with session.get(avatar_url) as resp:
-                avatar_data = await resp.read()
-        avatar_img = PILImage.open(io.BytesIO(avatar_data)).convert("RGBA").resize((80, 80))
-        # Circular mask
-        mask = PILImage.new("L", (80, 80), 0)
-        ImageDraw.Draw(mask).ellipse((0, 0, 80, 80), fill=255)
-        avatar_img.putalpha(mask)
+        os.remove(tmp_path)
     except Exception:
-        avatar_img = None
+        pass
 
-    # --- Build the card with PIL ---
-    W, H = 900, 480
-    card = PILImage.new("RGBA", (W, H), (13, 14, 20, 255))
-    draw = ImageDraw.Draw(card)
+    return io.BytesIO(screenshot)
 
-    # Panel backgrounds
-    # Left panel (chart area)
-    draw.rounded_rectangle([20, 20, 560, H - 20], radius=16, fill=(20, 22, 30, 255))
-    # Right panel (history)
-    draw.rounded_rectangle([580, 20, W - 20, H - 20], radius=16, fill=(20, 22, 30, 255))
 
-    # Avatar
-    if avatar_img:
-        card.paste(avatar_img, (36, 36), avatar_img)
-    else:
-        draw.ellipse([36, 36, 116, 116], fill=(40, 42, 55, 255))
 
-    # Username text
-    try:
-        font_big = ImageFont.truetype("arial.ttf", 22)
-        font_med = ImageFont.truetype("arial.ttf", 14)
-        font_sm  = ImageFont.truetype("arial.ttf", 12)
-        font_xs  = ImageFont.truetype("arial.ttf", 11)
-    except Exception:
-        font_big = ImageFont.load_default()
-        font_med = font_big
-        font_sm  = font_big
-        font_xs  = font_big
-
-    draw.text((128, 46), target.display_name, font=font_big, fill=(230, 230, 230, 255))
-    draw.text((128, 74), f"@{target.name}", font=font_med, fill=(110, 115, 135, 255))
-
-    # Big profit number
-    draw.text((36, 128), f"{profit_sign}{profit_now:,.2f}", font=font_big, fill=(230, 230, 230, 255))
-    profit_color_rgb = (0, 230, 118, 255) if is_positive else (255, 23, 68, 255)
-    draw.text((36, 158), f"{profit_sign}{profit_now:,.2f}", font=font_sm, fill=profit_color_rgb)
-
-    # --- Draw chart using matplotlib, render to PIL ---
-    fig, ax = plt.subplots(figsize=(5.0, 2.2), dpi=100)
-    fig.patch.set_facecolor("#14161E")
-    ax.set_facecolor("#14161E")
-
-    xs = list(range(len(profits)))
-    ys = profits
-
-    ax.plot(xs, ys, color=line_color, linewidth=2.0, solid_capstyle="round")
-    ax.fill_between(xs, ys, min(ys) - abs(max(ys) - min(ys)) * 0.1,
-                    color=fill_color, alpha=0.18)
-
-    # Dot at last point
-    ax.scatter([xs[-1]], [ys[-1]], color=line_color, s=50, zorder=5)
-
-    ax.set_xlim(0, max(1, len(xs) - 1))
-    ax.axis("off")
-    fig.tight_layout(pad=0.2)
-
-    chart_buf = io.BytesIO()
-    fig.savefig(chart_buf, format="png", dpi=100, bbox_inches="tight",
-                facecolor="#14161E", transparent=False)
-    plt.close(fig)
-    chart_buf.seek(0)
-    chart_pil = PILImage.open(chart_buf).convert("RGBA")
-    chart_pil = chart_pil.resize((500, 200))
-    card.paste(chart_pil, (30, 185), chart_pil)
-
-    # Profits badge
-    draw.rounded_rectangle([36, H - 80, 200, H - 40], radius=20, fill=(30, 33, 45, 255))
-    draw.text((56, H - 68), "Profits", font=font_xs, fill=(110, 115, 135, 255))
-    draw.text((56, H - 52), f"{profit_sign}{profit_now:,.2f}", font=font_sm, fill=profit_color_rgb)
-
-    # --- Right panel: deposit history ---
-    rx = 596
-    draw.text((rx, 36), "TYPE", font=font_xs, fill=(90, 95, 115, 255))
-    draw.text((rx + 140, 36), "DATE", font=font_xs, fill=(90, 95, 115, 255))
-    draw.text((rx + 240, 36), "AMOUNT", font=font_xs, fill=(90, 95, 115, 255))
-
-    # Divider
-    draw.line([(rx, 56), (W - 36, 56)], fill=(35, 38, 52, 255), width=1)
-
-    if deposit_rows:
-        for i, (dep_amt, dep_ts) in enumerate(deposit_rows[:6]):
-            y = 66 + i * 44
-            if y + 36 > H - 30:
-                break
-            row_bg = (24, 27, 38, 255) if i % 2 == 0 else (20, 22, 30, 255)
-            draw.rounded_rectangle([rx - 8, y, W - 28, y + 36], radius=8, fill=row_bg)
-            # Icon circle
-            draw.ellipse([rx, y + 8, rx + 20, y + 28], fill=(30, 180, 80, 60))
-            draw.text((rx + 4, y + 10), "â†“", font=font_sm, fill=(0, 210, 90, 255))
-            draw.text((rx + 28, y + 12), "Deposit", font=font_sm, fill=(200, 205, 220, 255))
-            import datetime
-            dt = datetime.datetime.fromtimestamp(dep_ts)
-            draw.text((rx + 140, y + 6), dt.strftime("%Y/%m/%d"), font=font_xs, fill=(140, 145, 165, 255))
-            draw.text((rx + 140, y + 20), dt.strftime("%I:%M %p"), font=font_xs, fill=(100, 105, 125, 255))
-            draw.text((rx + 250, y + 12), f"{dep_amt:+,.2f}", font=font_sm,
-                      fill=(0, 210, 90, 255) if dep_amt >= 0 else (255, 60, 60, 255))
-    else:
-        draw.text((rx, 80), "No deposits yet.", font=font_sm, fill=(100, 105, 125, 255))
-
-    buf = io.BytesIO()
-    card.convert("RGB").save(buf, "PNG")
-    buf.seek(0)
-    return buf
 
 
 @bot.tree.command(name="profit", description="Show a user's profit card with chart and history")
