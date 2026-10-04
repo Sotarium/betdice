@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     const params = new URLSearchParams({
       api_key: apiKey,
       psys_cid: requested,
-      uid: discordId,
+      uid: `v2_${discordId}`,
       callback_url: `${siteUrl}/api/plisio/callback?json=true`,
     });
 

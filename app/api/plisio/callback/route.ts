@@ -20,7 +20,8 @@ export async function POST(req: NextRequest) {
     console.log("[Plisio callback]", JSON.stringify(data));
 
     if (data.status === "completed" && (data.ipn_type === "pay_in" || data.ipn_type === "invoice")) {
-      const uid = data.deposit_uid || data.order_number;
+      const rawUid = String(data.deposit_uid || data.order_number || "");
+      const uid = rawUid.replace(/^v\d+_/, "");
       const amount = parseFloat(data.source_amount || data.amount || "0");
       console.log(`→ Credit user ${uid} with ${amount}`);
 
