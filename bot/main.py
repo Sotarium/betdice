@@ -1235,11 +1235,6 @@ body{{background:#0a0a0c;color:#f5f5f7;min-height:100vh;display:flex;align-items
 .fomo-profile-info{{display:flex;flex-direction:column;gap:4px;padding-bottom:8px}}
 .fomo-username{{font-size:22px;font-weight:700;color:#f5f5f7}}
 .fomo-handle{{font-size:13px;color:#6b6b80}}
-.stats-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}}
-.stat-card{{background:#12111a;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:6px;border:1px solid rgba(255,255,255,0.06)}}
-.stat-label{{font-size:11px;font-weight:600;color:#6b6b80;text-transform:uppercase;letter-spacing:.05em}}
-.stat-value{{font-size:22px;font-weight:700;color:#f5f5f7;line-height:1}}
-.stat-sub{{font-size:12px;color:#4b4b60}}
 .chart-card{{background:#12111a;border-radius:12px;padding:20px;border:1px solid rgba(255,255,255,0.06)}}
 .chart-title{{font-size:13px;font-weight:600;color:#9090a0;margin-bottom:14px}}
 .chart-wrap{{height:220px;position:relative}}
@@ -1278,30 +1273,8 @@ root.innerHTML=`
     <div class="fomo-handle">@${{D.username}}</div>
   </div>
 </div>
-<div class="stats-grid">
-  <div class="stat-card">
-    <div class="stat-label">Total Earnings</div>
-    <div class="stat-value">${{fmt(D.total_earnings_bux)}} <span style="font-size:13px;color:#4b4b60">dices</span></div>
-    <div class="stat-sub">≈ \$${{fmt(D.total_earnings_usd)}}</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">24h Earnings</div>
-    <div class="stat-value">${{fmt(D.earnings_24h_bux)}} <span style="font-size:13px;color:#4b4b60">dices</span></div>
-    <div class="stat-sub">≈ \$${{fmt(D.earnings_24h_usd)}}</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Balance</div>
-    <div class="stat-value">${{fmt(D.current_balance_bux)}} <span style="font-size:13px;color:#4b4b60">dices</span></div>
-    <div class="stat-sub">≈ \$${{fmt(D.current_balance_bux*BUX)}}</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Transactions</div>
-    <div class="stat-value">${{D.history.length}}</div>
-    <div class="stat-sub">all time</div>
-  </div>
-</div>
 <div class="chart-card">
-  <div class="chart-title">Balance History</div>
+  <div class="chart-title">Balance History (Last 24h Bets)</div>
   <div class="chart-wrap"><canvas id="chart"></canvas></div>
 </div>
 <div class="history-card">
@@ -1415,19 +1388,36 @@ async def generate_profit_card(target: discord.Member) -> io.BytesIO:
             "timestamp_ms": int(ts * 1000),
         })
 
-    # Build chart data (up to 12 points from ascending history)
+    # Build chart data from recorded bets in the last 24h
+    now_ts = time.time()
+    ts_24h_ago = now_ts - 86400
+
     chart_rows = db.execute(
-        "SELECT balance_after, ts FROM transactions WHERE user_id=? ORDER BY ts ASC",
-        (uid,),
+        "SELECT balance_after, ts FROM transactions WHERE user_id=? AND type='bet' AND ts >= ? ORDER BY ts ASC",
+        (uid, ts_24h_ago),
     ).fetchall()
+
     if chart_rows:
-        step = max(1, len(chart_rows) // 12)
-        sampled = chart_rows[::step][-12:]
+        step = max(1, len(chart_rows) // 16)
+        sampled = chart_rows[::step]
+        # Include the most recent bet if not already included
+        if chart_rows[-1] not in sampled:
+            sampled.append(chart_rows[-1])
         chart_points = [round(float(r[0]), 2) for r in sampled]
         chart_labels = [datetime.datetime.fromtimestamp(r[1]).strftime("%I:%M %p").lstrip("0") for r in sampled]
     else:
-        chart_points = [current_balance, current_balance]
-        chart_labels = ["Start", "Now"]
+        # If no bets in last 24h, check if there's any recent bet
+        latest_bet = db.execute(
+            "SELECT balance_after, ts FROM transactions WHERE user_id=? AND type='bet' ORDER BY ts DESC LIMIT 1",
+            (uid,),
+        ).fetchone()
+        if latest_bet:
+            chart_points = [round(float(latest_bet[0]), 2), round(float(latest_bet[0]), 2)]
+            lbl = datetime.datetime.fromtimestamp(latest_bet[1]).strftime("%I:%M %p").lstrip("0")
+            chart_labels = [lbl, "Now"]
+        else:
+            chart_points = [current_balance, current_balance]
+            chart_labels = ["24h ago", "Now"]
 
     # Get Discord avatar URL
     avatar_url = str(target.display_avatar.replace(size=256, format="png"))
