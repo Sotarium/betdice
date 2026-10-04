@@ -988,6 +988,258 @@ async def mines(
     await interaction.response.send_message(embed=embed, view=view)
 
 
+DICE_FACES_DIR = os.path.join(os.path.dirname(__file__), "assets", "dice")
+
+
+class DiceDuelView(discord.ui.View):
+    def __init__(self, p1: discord.Member, bet: float, target_wins: int):
+        super().__init__(timeout=180)
+        self.p1 = p1
+        self.p2: discord.Member = None
+        self.bet = bet
+        self.target_wins = target_wins
+        self.p1_score = 0
+        self.p2_score = 0
+        self.current_turn = 1  # 1 for p1, 2 for p2
+        self.round_num = 1
+        self.p1_roll = None
+        self.p2_roll = None
+        self.state = "lobby"  # "lobby", "playing", "finished"
+
+        # Lobby buttons
+        self.join_btn = discord.ui.Button(label=f"Join Duel ({bet:,.2f} dices)", style=discord.ButtonStyle.primary, row=0)
+        self.join_btn.callback = self.handle_join
+        self.add_item(self.join_btn)
+
+        self.cancel_btn = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary, row=0)
+        self.cancel_btn.callback = self.handle_cancel
+        self.add_item(self.cancel_btn)
+
+        # Roll button (hidden during lobby)
+        self.roll_btn = discord.ui.Button(label="Roll Dice 🎲", style=discord.ButtonStyle.primary, row=0)
+        self.roll_btn.callback = self.handle_roll
+
+    def get_dice_file(self, roll: int) -> discord.File:
+        fp = os.path.join(DICE_FACES_DIR, f"dice_{roll}.png")
+        if os.path.exists(fp):
+            return discord.File(fp, filename=f"dice_{roll}.png")
+        return None
+
+    def build_embed(self, last_desc: str = "") -> discord.Embed:
+        if self.state == "lobby":
+            embed = discord.Embed(
+                title="🎲 Dice Duel Challenge!",
+                description=(
+                    f"**Challenger:** {self.p1.mention}\n"
+                    f"**Entry Bet:** **{self.bet:,.2f}** dices each\n"
+                    f"**Race To:** First to **{self.target_wins}** win(s)\n"
+                    f"**Prize:** **{(self.bet * 2 * 0.95):,.2f}** dices (1.90x net after 5% house edge)\n\n"
+                    f"*Click below to accept and join the duel!*"
+                ),
+                color=0x0498fb,
+            )
+            return embed
+
+        turn_user = self.p1 if self.current_turn == 1 else self.p2
+        score_bar = f"**{self.p1.display_name}** ({self.p1_score}/{self.target_wins})  ⚔️  **{self.p2.display_name}** ({self.p2_score}/{self.target_wins})"
+
+        if self.state == "playing":
+            embed = discord.Embed(
+                title=f"🎲 Dice Duel — Round {self.round_num}",
+                description=f"{score_bar}\n\n{last_desc}\n👉 Turn: **{turn_user.mention}** — click **Roll Dice**!",
+                color=0x0498fb,
+            )
+        else:
+            # finished
+            winner = self.p1 if self.p1_score >= self.target_wins else self.p2
+            prize = round(self.bet * 2 * 0.95, 2)
+            embed = discord.Embed(
+                title="🏆 Dice Duel Champion!",
+                description=(
+                    f"{score_bar}\n\n"
+                    f"🎉 **{winner.mention}** wins the duel with **{max(self.p1_score, self.p2_score)}** win(s)!\n"
+                    f"💰 Prize: **+{prize:,.2f}** dices (1.90x)"
+                ),
+                color=0x0498fb,
+            )
+        return embed
+
+    async def handle_cancel(self, interaction: discord.Interaction):
+        if interaction.user.id != self.p1.id:
+            await interaction.response.send_message("Only the creator can cancel this duel.", ephemeral=True)
+            return
+        if self.state != "lobby":
+            await interaction.response.send_message("The duel has already started.", ephemeral=True)
+            return
+
+        self.state = "finished"
+        self.clear_items()
+        add_balance(self.p1.id, self.bet, tx_type="duel_refund")
+        end_active_game(self.p1.id)
+        embed = discord.Embed(
+            title="Duel Cancelled",
+            description=f"Duel was cancelled by {self.p1.mention}. Refunded **{self.bet:,.2f}** dices.",
+            color=0x0498fb,
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def handle_join(self, interaction: discord.Interaction):
+        if self.state != "lobby":
+            await interaction.response.send_message("Duel is no longer in lobby.", ephemeral=True)
+            return
+        if interaction.user.id == self.p1.id:
+            await interaction.response.send_message("You cannot play against yourself!", ephemeral=True)
+            return
+
+        p2_bal = get_total_balance(interaction.user.id)
+        if p2_bal < self.bet:
+            await interaction.response.send_message(
+                f"You need **{self.bet:,.2f}** dices to join, but only have **{p2_bal:,.2f}**.",
+                ephemeral=True,
+            )
+            return
+
+        # Deduct bet from player 2
+        add_balance(interaction.user.id, -self.bet, tx_type="bet")
+        start_active_game(interaction.user.id, "DiceDuel", self.bet)
+
+        self.p2 = interaction.user
+        self.state = "playing"
+        self.clear_items()
+        self.add_item(self.roll_btn)
+
+        embed = self.build_embed(last_desc=f"⚔️ **{self.p2.mention}** joined the duel!\nIt's **{self.p1.mention}**'s turn to roll first.")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def handle_roll(self, interaction: discord.Interaction):
+        if self.state != "playing":
+            await interaction.response.send_message("The game is not currently active.", ephemeral=True)
+            return
+
+        expected_user = self.p1 if self.current_turn == 1 else self.p2
+        if interaction.user.id != expected_user.id:
+            await interaction.response.send_message(f"It's not your turn! Waiting for {expected_user.mention}.", ephemeral=True)
+            return
+
+        roll_val = random.randint(1, 6)
+        dice_file = self.get_dice_file(roll_val)
+
+        if self.current_turn == 1:
+            self.p1_roll = roll_val
+            self.current_turn = 2
+            desc = f"🎲 **{self.p1.display_name}** rolled a **{self.p1_roll}**!\n"
+            embed = self.build_embed(last_desc=desc)
+            if dice_file:
+                embed.set_image(url=f"attachment://dice_{roll_val}.png")
+                await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
+            else:
+                await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            # Player 2 rolled -> resolve round
+            self.p2_roll = roll_val
+            round_desc = f"🎲 **{self.p1.display_name}** rolled a **{self.p1_roll}**\n🎲 **{self.p2.display_name}** rolled a **{self.p2_roll}**\n"
+
+            if self.p1_roll > self.p2_roll:
+                self.p1_score += 1
+                round_desc += f"💥 **{self.p1.display_name}** wins Round {self.round_num}!\n"
+            elif self.p2_roll > self.p1_roll:
+                self.p2_score += 1
+                round_desc += f"💥 **{self.p2.display_name}** wins Round {self.round_num}!\n"
+            else:
+                round_desc += f"🤝 Tie! Both rolled **{self.p1_roll}** — round replayed!\n"
+
+            # Check if someone reached target_wins
+            if self.p1_score >= self.target_wins or self.p2_score >= self.target_wins:
+                self.state = "finished"
+                self.clear_items()
+                winner = self.p1 if self.p1_score >= self.target_wins else self.p2
+                loser = self.p2 if winner == self.p1 else self.p1
+                prize = round(self.bet * 2 * 0.95, 2)
+                add_balance(winner.id, prize, tx_type="duel_win")
+                end_active_game(self.p1.id)
+                end_active_game(self.p2.id)
+
+                # Sync web deposits
+                asyncio.create_task(sync_website_deposit(winner.id, prize - self.bet, get_user(winner.id)[0]))
+                asyncio.create_task(sync_website_deposit(loser.id, -self.bet, get_user(loser.id)[0]))
+
+                embed = self.build_embed(last_desc=round_desc)
+                if dice_file:
+                    embed.set_image(url=f"attachment://dice_{roll_val}.png")
+                    await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
+                else:
+                    await interaction.response.edit_message(embed=embed, view=self)
+            else:
+                self.round_num += 1
+                self.current_turn = 1
+                self.p1_roll = None
+                self.p2_roll = None
+                embed = self.build_embed(last_desc=round_desc)
+                if dice_file:
+                    embed.set_image(url=f"attachment://dice_{roll_val}.png")
+                    await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
+                else:
+                    await interaction.response.edit_message(embed=embed, view=self)
+
+    async def on_timeout(self):
+        if self.state == "finished":
+            return
+        if self.state == "lobby":
+            # Refund player 1
+            add_balance(self.p1.id, self.bet, tx_type="duel_refund")
+            end_active_game(self.p1.id)
+        elif self.state == "playing":
+            # Game timed out mid-play: refund both players
+            add_balance(self.p1.id, self.bet, tx_type="duel_refund")
+            if self.p2:
+                add_balance(self.p2.id, self.bet, tx_type="duel_refund")
+                end_active_game(self.p2.id)
+            end_active_game(self.p1.id)
+        self.state = "finished"
+        self.clear_items()
+
+
+@bot.tree.command(name="diceduel", description="Challenge another player to a 2-player dice duel!")
+@app_commands.describe(
+    amount="Bet amount in dices each player puts in",
+    first_to="First to how many round wins? (1, 2, or 3)",
+)
+@app_commands.choices(first_to=[
+    app_commands.Choice(name="First to 1 win", value=1),
+    app_commands.Choice(name="First to 2 wins", value=2),
+    app_commands.Choice(name="First to 3 wins", value=3),
+])
+async def diceduel(
+    interaction: discord.Interaction,
+    amount: float,
+    first_to: int = 1,
+):
+    if amount <= 0:
+        await interaction.response.send_message("Bet amount must be greater than 0.", ephemeral=True)
+        return
+
+    if first_to not in [1, 2, 3]:
+        await interaction.response.send_message("Target wins must be 1, 2, or 3.", ephemeral=True)
+        return
+
+    p1_bal = get_total_balance(interaction.user.id)
+    if amount > p1_bal:
+        await interaction.response.send_message(
+            f"Not enough balance. You have **{p1_bal:,.2f}** dices.",
+            ephemeral=True,
+        )
+        return
+
+    # Deduct bet upfront from creator
+    add_balance(interaction.user.id, -amount, tx_type="bet")
+    start_active_game(interaction.user.id, "DiceDuel", amount)
+
+    view = DiceDuelView(p1=interaction.user, bet=amount, target_wins=first_to)
+    embed = view.build_embed()
+    await interaction.response.send_message(embed=embed, view=view)
+
+
+
 ALLOWED_TIPPER_ID = 1079074717799030824
 
 
