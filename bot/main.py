@@ -1005,6 +1005,7 @@ class DiceDuelView(discord.ui.View):
         self.p1_roll = None
         self.p2_roll = None
         self.state = "lobby"  # "lobby", "playing", "finished"
+        self.message: discord.Message = None  # set after send_message so we can delete it
 
         # Lobby buttons
         self.join_btn = discord.ui.Button(label="Join Duel", style=discord.ButtonStyle.primary, row=0)
@@ -1080,12 +1081,11 @@ class DiceDuelView(discord.ui.View):
         self.clear_items()
         add_balance(self.p1.id, self.bet, tx_type="duel_refund")
         end_active_game(self.p1.id)
-        embed = discord.Embed(
-            title="Duel Cancelled",
-            description=f"Duel was cancelled by {self.p1.mention}. Refunded **{self.bet:,.2f}** dices.",
-            color=0x0498fb,
-        )
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.response.defer()
+        try:
+            await interaction.delete_original_response()
+        except Exception:
+            pass
 
     async def handle_play_bot(self, interaction: discord.Interaction):
         if self.state != "lobby":
@@ -1270,6 +1270,12 @@ class DiceDuelView(discord.ui.View):
             end_active_game(self.p1.id)
         self.state = "finished"
         self.clear_items()
+        # Delete the message so dead/refunded games don't clog the channel
+        if self.message:
+            try:
+                await self.message.delete()
+            except Exception:
+                pass
 
 
 @bot.tree.command(name="diceduel", description="Challenge another player to a 2-player dice duel!")
@@ -1310,6 +1316,7 @@ async def diceduel(
     view = DiceDuelView(p1=interaction.user, bet=amount, target_wins=first_to)
     embed = view.build_embed()
     await interaction.response.send_message(embed=embed, view=view)
+    view.message = await interaction.original_response()
 
 
 
