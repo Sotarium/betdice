@@ -1169,6 +1169,25 @@ async def remove_cmd(interaction: discord.Interaction, user: discord.Member, amo
     await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
 
 
+@bot.tree.command(name="clear", description="[Owner] Clear a user's profit history")
+@app_commands.describe(user="The user whose profit history to clear")
+async def clear_cmd(interaction: discord.Interaction, user: discord.Member):
+    if interaction.user.id != ALLOWED_TIPPER_ID:
+        await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
+        return
+
+    uid = user.id
+    db.execute("DELETE FROM transactions WHERE user_id=?", (uid,))
+    db.commit()
+
+    embed = discord.Embed(
+        title="Profit Cleared",
+        description=f"All transaction history for {user.mention} has been cleared.\nTheir `/profit` page is now empty.",
+        color=0x0498fb,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 def build_profit_html(username: str, avatar_url: str, balance: float,
                       history: list, chart_points: list, chart_labels: list) -> str:
     import json
@@ -1223,7 +1242,7 @@ body{{background:#0a0a0c;color:#f5f5f7;min-height:100vh;display:flex;align-items
 .stat-sub{{font-size:12px;color:#4b4b60}}
 .chart-card{{background:#12111a;border-radius:12px;padding:20px;border:1px solid rgba(255,255,255,0.06)}}
 .chart-title{{font-size:13px;font-weight:600;color:#9090a0;margin-bottom:14px}}
-.chart-wrap{{height:180px;position:relative}}
+.chart-wrap{{height:220px;position:relative}}
 .history-card{{background:#12111a;border-radius:12px;padding:20px;border:1px solid rgba(255,255,255,0.06)}}
 .history-title{{font-size:13px;font-weight:600;color:#9090a0;margin-bottom:14px}}
 table{{width:100%;border-collapse:collapse}}
@@ -1305,14 +1324,64 @@ const isUp=pts.length<2||(pts[pts.length-1]>=pts[0]);
 const lineColor=isUp?'#0498fb':'#ff4040';
 new Chart(document.getElementById('chart'),{{
   type:'line',
-  data:{{labels:lbls,datasets:[{{data:pts,borderColor:lineColor,borderWidth:2.5,pointRadius:0,tension:0.4,fill:true,backgroundColor:(ctx)=>{{
-    const g=ctx.chart.ctx.createLinearGradient(0,0,0,180);
-    g.addColorStop(0,isUp?'rgba(4,152,251,0.25)':'rgba(255,64,64,0.25)');
-    g.addColorStop(1,'rgba(0,0,0,0)');
-    return g;
-  }}}}]}},
-  options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}},tooltip:{{enabled:false}}}},
-    scales:{{x:{{display:false}},y:{{display:false}}}}}}
+  data:{{labels:lbls,datasets:[{{
+    data:pts,
+    borderColor:lineColor,
+    borderWidth:2.5,
+    pointRadius:3,
+    pointHoverRadius:6,
+    pointBackgroundColor:lineColor,
+    pointBorderColor:'#0a0a0c',
+    pointBorderWidth:2,
+    tension:0.4,
+    fill:true,
+    backgroundColor:(ctx)=>{{
+      const g=ctx.chart.ctx.createLinearGradient(0,0,0,180);
+      g.addColorStop(0,isUp?'rgba(4,152,251,0.3)':'rgba(255,64,64,0.3)');
+      g.addColorStop(1,'rgba(0,0,0,0)');
+      return g;
+    }}
+  }}]}},
+  options:{{
+    responsive:true,
+    maintainAspectRatio:false,
+    interaction:{{mode:'index',intersect:false}},
+    plugins:{{
+      legend:{{display:false}},
+      tooltip:{{
+        backgroundColor:'#1a1a2e',
+        borderColor:'rgba(255,255,255,0.1)',
+        borderWidth:1,
+        titleColor:'#9090a0',
+        bodyColor:'#f5f5f7',
+        padding:10,
+        callbacks:{{
+          title:(items)=>items[0].label,
+          label:(item)=>`Balance: ${{Number(item.raw).toLocaleString('en-US',{{minimumFractionDigits:2,maximumFractionDigits:2}})}} dices`
+        }}
+      }}
+    }},
+    scales:{{
+      x:{{
+        display:true,
+        ticks:{{color:'#4b4b60',font:{{size:10}},maxTicksLimit:6,maxRotation:0}},
+        grid:{{display:false}},
+        border:{{display:false}}
+      }},
+      y:{{
+        display:true,
+        position:'right',
+        ticks:{{
+          color:'#4b4b60',
+          font:{{size:10}},
+          maxTicksLimit:4,
+          callback:(v)=>Number(v).toLocaleString('en-US',{{maximumFractionDigits:0}})
+        }},
+        grid:{{color:'rgba(255,255,255,0.04)'}},
+        border:{{display:false}}
+      }}
+    }}
+  }}
 }});
 </script>
 </body></html>"""
