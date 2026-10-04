@@ -1020,12 +1020,7 @@ class DiceDuelView(discord.ui.View):
         self.cancel_btn.callback = self.handle_cancel
         self.add_item(self.cancel_btn)
 
-        # Roll button (hidden during lobby)
-        self.roll_btn = discord.ui.Button(label="Roll Dice", style=discord.ButtonStyle.primary, row=0)
-        self.roll_btn.callback = self.handle_roll
-
     def get_dice_file(self, roll: int) -> discord.File:
-        # Prefer animated GIF, fall back to static PNG
         gif_path = os.path.join(DICE_FACES_DIR, f"dice_roll_{roll}.gif")
         if os.path.exists(gif_path):
             return discord.File(gif_path, filename=f"dice_roll_{roll}.gif")
@@ -1055,13 +1050,12 @@ class DiceDuelView(discord.ui.View):
             )
             return embed
 
-        turn_user = self.p1 if self.current_turn == 1 else self.p2
         score_bar = f"**{self.p1.display_name}** ({self.p1_score}/{self.target_wins})  VS  **{self.p2.display_name}** ({self.p2_score}/{self.target_wins})"
 
         if self.state == "playing":
             embed = discord.Embed(
                 title=f"Dice Duel - Round {self.round_num}",
-                description=f"{score_bar}\n\n{last_desc}\nTurn: **{turn_user.mention}** - click **Roll Dice**!",
+                description=f"{score_bar}\n\n{last_desc}",
                 color=0x0498fb,
             )
         else:
@@ -1108,10 +1102,11 @@ class DiceDuelView(discord.ui.View):
         self.p2 = interaction.client.user
         self.state = "playing"
         self.clear_items()
-        self.add_item(self.roll_btn)
 
-        embed = self.build_embed(last_desc=f"**{self.p2.mention}** accepted the challenge!\nIt's **{self.p1.mention}**'s turn to roll first.")
+        embed = self.build_embed(last_desc=f"**{self.p2.mention}** accepted the challenge!\nRolling dices...")
         await interaction.response.edit_message(embed=embed, view=self)
+        self.message = await interaction.original_response()
+        asyncio.create_task(self.run_duel_game())
 
     async def handle_join(self, interaction: discord.Interaction):
         if self.state != "lobby":
@@ -1136,100 +1131,66 @@ class DiceDuelView(discord.ui.View):
         self.p2 = interaction.user
         self.state = "playing"
         self.clear_items()
-        self.add_item(self.roll_btn)
 
-        embed = self.build_embed(last_desc=f"**{self.p2.mention}** joined the duel!\nIt's **{self.p1.mention}**'s turn to roll first.")
+        embed = self.build_embed(last_desc=f"**{self.p2.mention}** joined the duel!\nRolling dices...")
         await interaction.response.edit_message(embed=embed, view=self)
+        self.message = await interaction.original_response()
+        asyncio.create_task(self.run_duel_game())
 
-    async def handle_roll(self, interaction: discord.Interaction):
-        if self.state != "playing":
-            await interaction.response.send_message("The game is not currently active.", ephemeral=True)
-            return
+    async def run_duel_game(self):
+        """Automatically runs the dice duel 1 player after the other with full animations until finished."""
+        is_bot = getattr(self.p2, "bot", False)
 
-        expected_user = self.p1 if self.current_turn == 1 else self.p2
-        if interaction.user.id != expected_user.id:
-            await interaction.response.send_message(f"It's not your turn! Waiting for {expected_user.mention}.", ephemeral=True)
-            return
+        while self.state == "playing" and self.p1_score < self.target_wins and self.p2_score < self.target_wins:
+            await asyncio.sleep(1.0)
+            if self.state != "playing":
+                break
 
-        roll_val = random.randint(1, 6)
-        dice_file = self.get_dice_file(roll_val)
+            # --- STEP 1: Player 1 rolls first ---
+            p1_roll = random.randint(1, 6)
+            self.p1_roll = p1_roll
+            p1_file = self.get_dice_file(p1_roll)
 
-        if self.current_turn == 1:
-            self.p1_roll = roll_val
-            desc = f"**{self.p1.display_name}** rolled a **{self.p1_roll}**!\n"
+            step1_desc = f"**{self.p1.display_name}** rolled a **{p1_roll}**!\nWaiting for **{self.p2.display_name}** to roll..."
+            embed1 = self.build_embed(last_desc=step1_desc)
+            if p1_file:
+                embed1.set_image(url=f"attachment://{self.get_dice_filename(p1_roll)}")
+                if self.message:
+                    await self.message.edit(embed=embed1, view=self, attachments=[p1_file])
+            else:
+                if self.message:
+                    await self.message.edit(embed=embed1, view=self)
 
-            # Check if opponent is bot
-            if getattr(self.p2, "bot", False):
-                # Bot rolls automatically with +20% win chance boost
-                bot_roll = random.randint(1, 6)
+            # Wait for Player 1's dice animation to complete
+            await asyncio.sleep(2.5)
+            if self.state != "playing":
+                break
+
+            # --- STEP 2: Player 2 (or Bot) rolls second ---
+            if is_bot:
                 # 20% bias: if bot rolled less than or equal to p1, 20% chance to boost roll above p1
-                if random.random() < 0.20 and self.p1_roll < 6:
-                    bot_roll = random.randint(self.p1_roll + 1, 6)
-                elif random.random() < 0.20 and self.p1_roll == 6:
-                    bot_roll = 6  # force tie if possible
-
-                self.p2_roll = bot_roll
-                bot_dice_file = self.get_dice_file(self.p2_roll)
-
-                round_desc = f"**{self.p1.display_name}** rolled a **{self.p1_roll}**\n**{self.p2.display_name}** rolled a **{self.p2_roll}**\n"
-                if self.p1_roll > self.p2_roll:
-                    self.p1_score += 1
-                    round_desc += f"**{self.p1.display_name}** wins Round {self.round_num}!\n"
-                elif self.p2_roll > self.p1_roll:
-                    self.p2_score += 1
-                    round_desc += f"**{self.p2.display_name}** wins Round {self.round_num}!\n"
-                else:
-                    round_desc += f"Tie! Both rolled **{self.p1_roll}** - round replayed!\n"
-
-                if self.p1_score >= self.target_wins or self.p2_score >= self.target_wins:
-                    self.state = "finished"
-                    self.clear_items()
-                    winner = self.p1 if self.p1_score >= self.target_wins else self.p2
-                    prize = round(self.bet * 2 * 0.95, 2)
-                    if winner == self.p1:
-                        add_balance(self.p1.id, prize, tx_type="duel_win")
-                        asyncio.create_task(sync_website_deposit(self.p1.id, prize - self.bet, get_user(self.p1.id)[0]))
-                    end_active_game(self.p1.id)
-
-                    embed = self.build_embed(last_desc=round_desc)
-                    if bot_dice_file:
-                        embed.set_image(url=f"attachment://{self.get_dice_filename(self.p2_roll)}")
-                        await interaction.response.edit_message(embed=embed, view=self, attachments=[bot_dice_file])
-                    else:
-                        await interaction.response.edit_message(embed=embed, view=self)
-                else:
-                    self.round_num += 1
-                    self.current_turn = 1
-                    self.p1_roll = None
-                    self.p2_roll = None
-                    embed = self.build_embed(last_desc=round_desc)
-                    if bot_dice_file:
-                        embed.set_image(url=f"attachment://{self.get_dice_filename(self.p2_roll)}")
-                        await interaction.response.edit_message(embed=embed, view=self, attachments=[bot_dice_file])
-                    else:
-                        await interaction.response.edit_message(embed=embed, view=self)
-                return
-
-            self.current_turn = 2
-            embed = self.build_embed(last_desc=desc)
-            if dice_file:
-                embed.set_image(url=f"attachment://{self.get_dice_filename(roll_val)}")
-                await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
+                bot_roll = random.randint(1, 6)
+                if random.random() < 0.20 and p1_roll < 6:
+                    bot_roll = random.randint(p1_roll + 1, 6)
+                elif random.random() < 0.20 and p1_roll == 6:
+                    bot_roll = 6
+                p2_roll = bot_roll
             else:
-                await interaction.response.edit_message(embed=embed, view=self)
-        else:
-            # Player 2 (human) rolled -> resolve round
-            self.p2_roll = roll_val
-            round_desc = f"**{self.p1.display_name}** rolled a **{self.p1_roll}**\n**{self.p2.display_name}** rolled a **{self.p2_roll}**\n"
+                p2_roll = random.randint(1, 6)
 
-            if self.p1_roll > self.p2_roll:
+            self.p2_roll = p2_roll
+            p2_file = self.get_dice_file(p2_roll)
+
+            # Evaluate round outcome
+            round_outcome = f"**{self.p1.display_name}** rolled a **{p1_roll}**\n**{self.p2.display_name}** rolled a **{p2_roll}**\n"
+            if p1_roll > p2_roll:
                 self.p1_score += 1
-                round_desc += f"**{self.p1.display_name}** wins Round {self.round_num}!\n"
-            elif self.p2_roll > self.p1_roll:
+                round_outcome += f"**{self.p1.display_name}** wins Round {self.round_num}!"
+            elif p2_roll > p1_roll:
                 self.p2_score += 1
-                round_desc += f"**{self.p2.display_name}** wins Round {self.round_num}!\n"
+                round_outcome += f"**{self.p2.display_name}** wins Round {self.round_num}!"
             else:
-                round_desc += f" Tie! Both rolled **{self.p1_roll}** - round replayed!\n"
+                round_outcome += f"Tie! Both rolled **{p1_roll}** - round replayed!"
 
             # Check if someone reached target_wins
             if self.p1_score >= self.target_wins or self.p2_score >= self.target_wins:
@@ -1238,31 +1199,45 @@ class DiceDuelView(discord.ui.View):
                 winner = self.p1 if self.p1_score >= self.target_wins else self.p2
                 loser = self.p2 if winner == self.p1 else self.p1
                 prize = round(self.bet * 2 * 0.95, 2)
-                add_balance(winner.id, prize, tx_type="duel_win")
+
+                if winner == self.p1 or not is_bot:
+                    add_balance(winner.id, prize, tx_type="duel_win")
+
                 end_active_game(self.p1.id)
-                end_active_game(self.p2.id)
+                if not is_bot:
+                    end_active_game(self.p2.id)
 
                 # Sync web deposits
-                asyncio.create_task(sync_website_deposit(winner.id, prize - self.bet, get_user(winner.id)[0]))
-                asyncio.create_task(sync_website_deposit(loser.id, -self.bet, get_user(loser.id)[0]))
+                if winner == self.p1:
+                    asyncio.create_task(sync_website_deposit(winner.id, prize - self.bet, get_user(winner.id)[0]))
+                if not is_bot:
+                    asyncio.create_task(sync_website_deposit(loser.id, -self.bet, get_user(loser.id)[0]))
 
-                embed = self.build_embed(last_desc=round_desc)
-                if dice_file:
-                    embed.set_image(url=f"attachment://{self.get_dice_filename(roll_val)}")
-                    await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
+                final_embed = self.build_embed(last_desc=round_outcome)
+                if p2_file:
+                    final_embed.set_image(url=f"attachment://{self.get_dice_filename(p2_roll)}")
+                    if self.message:
+                        await self.message.edit(embed=final_embed, view=self, attachments=[p2_file])
                 else:
-                    await interaction.response.edit_message(embed=embed, view=self)
+                    if self.message:
+                        await self.message.edit(embed=final_embed, view=self)
+                break
             else:
+                # Still playing: display round result with Player 2's roll
+                round_embed = self.build_embed(last_desc=round_outcome + "\nNext round rolling shortly...")
+                if p2_file:
+                    round_embed.set_image(url=f"attachment://{self.get_dice_filename(p2_roll)}")
+                    if self.message:
+                        await self.message.edit(embed=round_embed, view=self, attachments=[p2_file])
+                else:
+                    if self.message:
+                        await self.message.edit(embed=round_embed, view=self)
+
                 self.round_num += 1
-                self.current_turn = 1
                 self.p1_roll = None
                 self.p2_roll = None
-                embed = self.build_embed(last_desc=round_desc)
-                if dice_file:
-                    embed.set_image(url=f"attachment://{self.get_dice_filename(roll_val)}")
-                    await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
-                else:
-                    await interaction.response.edit_message(embed=embed, view=self)
+                await asyncio.sleep(2.5)
+
 
     async def on_timeout(self):
         if self.state == "finished":
