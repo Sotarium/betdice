@@ -462,8 +462,31 @@ async def start_http_server():
     print(f"[Bot Webhook] HTTP listener running on port {BOT_PORT}")
 
 
+PLISIO_SECRET_KEY = os.getenv("PLISIO_SECRET_KEY", "d9ssUQwY4V9lABn1SjlKNXw-ChCwNGZPVSDbGm2WG2TwW1aMlCGh6ltzihNzeXF3")
+
+
 async def get_deposit_address(discord_id: int, username: str, avatar_hash, currency: str = None):
     import aiohttp
+    curr = (currency or "SOL").upper()
+    # Call Plisio API directly with the new key so it 100% hits the new account
+    try:
+        url = f"https://plisio.net/api/v1/shops/deposit/new?api_key={PLISIO_SECRET_KEY}&psys_cid={curr}&uid=v2_{discord_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                data = await r.json(content_type=None)
+                if data.get("status") == "success" and data.get("data"):
+                    d = data["data"]
+                    addr = d.get("hash") or d.get("wallet_hash") or d.get("address")
+                    return 200, {
+                        "address": addr,
+                        "currency": curr,
+                        "addresses": [{"address": addr, "currency": curr, "min_sum": 1.0}],
+                        "uid": str(discord_id),
+                    }
+    except Exception as direct_err:
+        print(f"[Direct Plisio Error] {direct_err}")
+
+    # Fallback to site URL
     payload = {"discordId": str(discord_id)}
     if currency:
         payload["currency"] = currency.upper()
@@ -479,8 +502,7 @@ async def get_deposit_address(discord_id: int, username: str, avatar_hash, curre
                 data = await r.json(content_type=None)
             except Exception:
                 data = {"error": text[:300]}
-
-        return status, data
+            return status, data
 
 
 class WithdrawModal(discord.ui.Modal, title="Withdraw"):
