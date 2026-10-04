@@ -3,6 +3,14 @@
  * Discord bot POSTs to /api/users/sync to add activity.
  */
 
+export interface RawTx {
+  type: string;
+  amount: number;
+  balance_after: number;
+  when: string;
+  timestamp_ms: number;
+}
+
 export interface Tx {
   type: "Deposit" | "Withdraw" | "Play";
   date: string;
@@ -18,7 +26,11 @@ export interface UserStats {
   profit: number;
   txs: Tx[];
   chart: { t: string; v: number }[];
+  history?: RawTx[];
+  chart_points?: number[];
+  chart_labels?: string[];
 }
+
 
 const store: Record<string, UserStats> = {};
 

@@ -27,9 +27,20 @@ export async function GET(req: NextRequest) {
   const totalBux = user.profit / 0.002;
   const balanceBux = user.balance / 0.002;
 
-  // Map txs to history items expected by the client component
-  const history = (user.txs || []).map((t, idx) => {
-    return {
+  // Prefer raw history from bot profit_refresh sync if available
+  let history;
+  if (user.history && user.history.length > 0) {
+    history = user.history.map((t) => ({
+      amount_usd: t.amount,
+      amount_bux: t.amount / 0.002,
+      when: t.when,
+      time: String(t.when).split(",")[1]?.trim() || t.when,
+      timestamp_ms: t.timestamp_ms,
+      type: t.type,
+      balance_after: t.balance_after,
+    }));
+  } else {
+    history = (user.txs || []).map((t, idx) => ({
       amount_usd: t.amount,
       amount_bux: t.amount / 0.002,
       when: t.date,
@@ -37,11 +48,16 @@ export async function GET(req: NextRequest) {
       timestamp_ms: Date.now() - idx * 60000,
       type: t.type,
       label: t.label,
-    };
-  });
+    }));
+  }
 
-  const chartLabels = user.chart && user.chart.length ? user.chart.map((c) => c.t) : ["7:00 PM", "8:00 PM"];
-  const chartPoints = user.chart && user.chart.length ? user.chart.map((c) => Number(c.v.toFixed(2))) : [0, 0];
+  // Prefer explicit chart_points/chart_labels from bot sync
+  const chartLabels = user.chart_labels && user.chart_labels.length
+    ? user.chart_labels
+    : (user.chart && user.chart.length ? user.chart.map((c) => c.t) : ["7:00 PM", "8:00 PM"]);
+  const chartPoints = user.chart_points && user.chart_points.length
+    ? user.chart_points
+    : (user.chart && user.chart.length ? user.chart.map((c) => Number(c.v.toFixed(2))) : [0, 0]);
 
   return NextResponse.json({
     username: user.username,
@@ -56,3 +72,4 @@ export async function GET(req: NextRequest) {
     chart_labels: chartLabels,
   });
 }
+

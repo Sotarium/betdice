@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_IP = "24.49.252.230";
+const BOT_SECRET = process.env.BOT_INTERNAL_SECRET || "betdice_secret";
 
 export function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
@@ -20,6 +21,12 @@ export function middleware(req: NextRequest) {
   const isProfile = segments.length === 1 && segments[0] !== "";
 
   if (!isUsers && !isProfile) {
+    return NextResponse.next();
+  }
+
+  // Allow bot bypass via secret header
+  const botSecret = req.headers.get("x-bot-secret");
+  if (botSecret && botSecret === BOT_SECRET) {
     return NextResponse.next();
   }
 
