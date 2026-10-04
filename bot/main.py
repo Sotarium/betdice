@@ -175,6 +175,10 @@ db.execute(
     "CREATE TABLE IF NOT EXISTS active_games ("
     "user_id INTEGER PRIMARY KEY, game TEXT, bet_amount REAL, started_at REAL)"
 )
+db.execute(
+    "CREATE TABLE IF NOT EXISTS processed_deposits ("
+    "operation_id TEXT PRIMARY KEY, user_id INTEGER, amount REAL, created_at REAL)"
+)
 db.commit()
 
 
@@ -1817,13 +1821,67 @@ async def profit_cmd(interaction: discord.Interaction, user: discord.Member):
 
 async def poll_pending_deposits():
     """
-    Periodically checks the website for uncredited Plisio deposits.
-    Ensures deposits work even when the bot cannot receive direct inbound webhooks.
+    Periodically checks both the website queue AND Plisio's direct operations API
+    to instantly credit any confirmed deposits.
     """
     import aiohttp
     await bot.wait_until_ready()
     print("[Deposit Poller] Started background polling for deposits...")
     while not bot.is_closed():
+        # 1. Direct Plisio API check (Instant & independent of webhooks)
+        try:
+            url = f"https://plisio.net/api/v1/operations?api_key={PLISIO_SECRET_KEY}&status=completed"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        ops = data.get("data", {}).get("operations", [])
+                        for op in ops:
+                            op_id = op.get("id")
+                            if not op_id or op.get("status") != "completed":
+                                continue
+                            if op.get("type") not in ["pay_in", "invoice"]:
+                                continue
+
+                            # Check if already processed
+                            existing = db.execute("SELECT 1 FROM processed_deposits WHERE operation_id = ?", (op_id,)).fetchone()
+                            if existing:
+                                continue
+
+                            raw_uid = (op.get("params") or {}).get("deposit_uid") or op.get("order_number") or ""
+                            clean_uid = str(raw_uid).replace("v2_", "").strip()
+                            if not clean_uid.isdigit():
+                                continue
+
+                            discord_id = int(clean_uid)
+
+                            # Calculate USD amount (dices)
+                            # source_rate is the crypto-to-USD rate in Plisio (e.g. SOL/USD)
+                            source_rate = float((op.get("params") or {}).get("source_rate") or 0)
+                            crypto_amount = float(op.get("amount") or op.get("sum") or 0)
+
+                            if source_rate > 0:
+                                amount_usd = round(crypto_amount / source_rate, 2)
+                            else:
+                                amount_usd = round(crypto_amount, 2)
+
+                            if amount_usd > 0:
+                                db.execute(
+                                    "INSERT INTO processed_deposits (operation_id, user_id, amount, created_at) VALUES (?, ?, ?, ?)",
+                                    (op_id, discord_id, amount_usd, time.time())
+                                )
+                                db.commit()
+
+                                add_balance(discord_id, amount_usd, tx_type="deposit")
+                                new_bal, _, _, _ = get_user(discord_id)
+                                print(f"[Direct Plisio Poller] Credited user {discord_id} with {amount_usd} dices! New Balance: {new_bal}")
+
+                                asyncio.create_task(notify_user_deposit(discord_id, amount_usd, new_bal))
+                                asyncio.create_task(sync_website_deposit(discord_id, amount_usd, new_bal))
+        except Exception as e:
+            print(f"[Direct Plisio Poller Error] {e}")
+
+        # 2. Check site pending deposits queue
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -1854,10 +1912,10 @@ async def poll_pending_deposits():
                                 json={"id": dep_id},
                                 timeout=aiohttp.ClientTimeout(total=5),
                             )
-        except Exception as e:
-            # Silent retry
+        except Exception:
             pass
-        await asyncio.sleep(4)
+
+        await asyncio.sleep(5)
 
 
 async def run_bot_and_server():
