@@ -1,4 +1,4 @@
-"""
+﻿"""
 Betdice Discord bot
 Requires env: DISCORD_TOKEN
 Optional: SITE_URL
@@ -27,22 +27,22 @@ BOT_PORT = int(os.getenv("PORT", os.getenv("BOT_PORT", "8080")))
 
 LAYOUT = {
     "important": [
-        ("ðŸŽ«ãƒ»ticket", False),
-        ("ðŸ“¢ãƒ»news", True),
-        ("ðŸ“©ãƒ»invite-rewards", False),
-        ("ðŸ”¨ãƒ»event", False),
-        ("ðŸ’ãƒ»giveaway", False),
-        ("ðŸš€-invite", False),
+        ("Ã°Å¸Å½Â«Ã£Æ’Â»ticket", False),
+        ("Ã°Å¸â€œÂ¢Ã£Æ’Â»news", True),
+        ("Ã°Å¸â€œÂ©Ã£Æ’Â»invite-rewards", False),
+        ("Ã°Å¸â€Â¨Ã£Æ’Â»event", False),
+        ("Ã°Å¸â€™ÂÃ£Æ’Â»giveaway", False),
+        ("Ã°Å¸Å¡â‚¬-invite", False),
     ],
-    "ðŸŽ²ãƒ»PLAY": [
-        ("ðŸ’°-history", True),
-        ("ðŸ’¸ãƒ»play-1", False),
-        ("ðŸ’¸ãƒ»play-2", False),
-        ("ðŸ’¸ãƒ»play-3", False),
+    "Ã°Å¸Å½Â²Ã£Æ’Â»PLAY": [
+        ("Ã°Å¸â€™Â°-history", True),
+        ("Ã°Å¸â€™Â¸Ã£Æ’Â»play-1", False),
+        ("Ã°Å¸â€™Â¸Ã£Æ’Â»play-2", False),
+        ("Ã°Å¸â€™Â¸Ã£Æ’Â»play-3", False),
     ],
-    "ðŸ’¬ãƒ»COMMUNITY": [
-        ("âœ‰ï¸ãƒ»general", False),
-        ("âœ…ãƒ»vouch", False),
+    "Ã°Å¸â€™Â¬Ã£Æ’Â»COMMUNITY": [
+        ("Ã¢Å“â€°Ã¯Â¸ÂÃ£Æ’Â»general", False),
+        ("Ã¢Å“â€¦Ã£Æ’Â»vouch", False),
     ],
 }
 
@@ -241,7 +241,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
     total_clicks = sum(r[1] for r in rows)
 
     if total_clicks < 10:
-        # Not enough data — pure random
+        # Not enough data â€” pure random
         return set(random.sample(range(total_tiles), bombs))
 
     # Build weight array
@@ -257,7 +257,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
     random_threshold = (uniform ** 2) * 0.3  # low variance = random
 
     if variance <= random_threshold:
-        # Random player — 50/50 between two alternating zones
+        # Random player â€” 50/50 between two alternating zones
         # Zone A: even tile indices (cols 0,2,4 per row)
         # Zone B: odd tile indices (cols 1,3 per row)
         zone = random.randint(0, 1)  # 0=even zone, 1=odd zone
@@ -271,7 +271,7 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
             else:
                 biased_weights.append(0.4 / len(other_tiles))
     else:
-        # Pattern player — boost their top tiles by 25%
+        # Pattern player â€” boost their top tiles by 25%
         biased_weights = []
         for w in weights:
             if w > uniform:
@@ -564,7 +564,7 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             # Refund balance to user
             add_balance(interaction.user.id, amt, tx_type="refund")
             await interaction.followup.send(
-                f"âŒ **Withdrawal Failed:** {payout_error}\nYour balance of **{amt:,.2f}** dices has been refunded.",
+                f"Ã¢ÂÅ’ **Withdrawal Failed:** {payout_error}\nYour balance of **{amt:,.2f}** dices has been refunded.",
                 ephemeral=True,
             )
             return
@@ -590,7 +590,7 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
 
         tx_info = f"\n**Transaction ID:** `{txn_id}`" if txn_id else ""
         embed = discord.Embed(
-            title="âœ… Withdrawal Sent!",
+            title="Ã¢Å“â€¦ Withdrawal Sent!",
             description=(
                 f"**Amount:** {amt:,.2f} dices\n"
                 f"**Currency:** {currency}\n"
@@ -641,7 +641,7 @@ async def send_deposit_dm(user: discord.User, currency: str):
     try:
         await user.send(embed=embed)
     except discord.Forbidden:
-        pass  # DMs disabled — caller handles this
+        pass  # DMs disabled â€” caller handles this
 
 
 class DepositCoinView(discord.ui.View):
@@ -712,9 +712,9 @@ async def bal(interaction: discord.Interaction, user: discord.Member = None):
 
     desc = f"{dice_emoji(interaction.guild)} **{total:,.2f}** dices"
     if promo > 0:
-        desc += f"\n• Withdrawable: **{bal:,.2f}** dices\n• Non-withdrawable: **{promo:,.2f}** dices"
+        desc += f"\nâ€¢ Withdrawable: **{bal:,.2f}** dices\nâ€¢ Non-withdrawable: **{promo:,.2f}** dices"
     if wager_req > 0:
-        desc += f"\n• Wager Required: **{wager_req:,.2f}** dices"
+        desc += f"\nâ€¢ Wager Required: **{wager_req:,.2f}** dices"
 
     embed = discord.Embed(
         title=title,
@@ -821,7 +821,7 @@ class MinesView(discord.ui.View):
             embed = discord.Embed(
                 title="Cashed Out",
                 description=(
-                    f"**{self.current_multiplier:.2f}x** — +{cashout_amt:,.2f} dices"
+                    f"**{self.current_multiplier:.2f}x** â€” +{cashout_amt:,.2f} dices"
                 ),
                 color=0x0498fb,
             )
@@ -829,7 +829,7 @@ class MinesView(discord.ui.View):
             embed = discord.Embed(
                 title="Board Cleared",
                 description=(
-                    f"**{self.current_multiplier:.2f}x** — +{cashout_amt:,.2f} dices"
+                    f"**{self.current_multiplier:.2f}x** â€” +{cashout_amt:,.2f} dices"
                 ),
                 color=0x0498fb,
             )
@@ -837,7 +837,7 @@ class MinesView(discord.ui.View):
             embed = discord.Embed(
                 title="Bomb Hit",
                 description=(
-                    f"Lost **{self.bet_amount:,.2f}** dices · {revealed_count} tiles cleared"
+                    f"Lost **{self.bet_amount:,.2f}** dices Â· {revealed_count} tiles cleared"
                 ),
                 color=0x0498fb,
             )
@@ -1025,10 +1025,20 @@ class DiceDuelView(discord.ui.View):
         self.roll_btn.callback = self.handle_roll
 
     def get_dice_file(self, roll: int) -> discord.File:
-        fp = os.path.join(DICE_FACES_DIR, f"dice_{roll}.png")
-        if os.path.exists(fp):
-            return discord.File(fp, filename=f"dice_{roll}.png")
+        # Prefer animated GIF, fall back to static PNG
+        gif_path = os.path.join(DICE_FACES_DIR, f"dice_roll_{roll}.gif")
+        if os.path.exists(gif_path):
+            return discord.File(gif_path, filename=f"dice_roll_{roll}.gif")
+        png_path = os.path.join(DICE_FACES_DIR, f"dice_{roll}.png")
+        if os.path.exists(png_path):
+            return discord.File(png_path, filename=f"dice_{roll}.png")
         return None
+
+    def get_dice_filename(self, roll: int) -> str:
+        gif_path = os.path.join(DICE_FACES_DIR, f"dice_roll_{roll}.gif")
+        if os.path.exists(gif_path):
+            return f"dice_roll_{roll}.gif"
+        return f"dice_{roll}.png"
 
     def build_embed(self, last_desc: str = "") -> discord.Embed:
         if self.state == "lobby":
@@ -1050,8 +1060,8 @@ class DiceDuelView(discord.ui.View):
 
         if self.state == "playing":
             embed = discord.Embed(
-                title=f"Dice Duel — Round {self.round_num}",
-                description=f"{score_bar}\n\n{last_desc}\nTurn: **{turn_user.mention}** — click **Roll Dice**!",
+                title=f"Dice Duel â€” Round {self.round_num}",
+                description=f"{score_bar}\n\n{last_desc}\nTurn: **{turn_user.mention}** â€” click **Roll Dice**!",
                 color=0x0498fb,
             )
         else:
@@ -1059,7 +1069,7 @@ class DiceDuelView(discord.ui.View):
             winner = self.p1 if self.p1_score >= self.target_wins else self.p2
             prize = round(self.bet * 2 * 0.95, 2)
             embed = discord.Embed(
-                title="Dice Duel — Champion!",
+                title="Dice Duel â€” Champion!",
                 description=(
                     f"{score_bar}\n\n"
                     f"**{winner.mention}** wins the duel with **{max(self.p1_score, self.p2_score)}** win(s)!\n"
@@ -1100,7 +1110,7 @@ class DiceDuelView(discord.ui.View):
         self.clear_items()
         self.add_item(self.roll_btn)
 
-        embed = self.build_embed(last_desc=f"🤖 **{self.p2.mention}** accepted the challenge!\nIt's **{self.p1.mention}**'s turn to roll first.")
+        embed = self.build_embed(last_desc=f"ðŸ¤– **{self.p2.mention}** accepted the challenge!\nIt's **{self.p1.mention}**'s turn to roll first.")
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def handle_join(self, interaction: discord.Interaction):
@@ -1146,7 +1156,7 @@ class DiceDuelView(discord.ui.View):
 
         if self.current_turn == 1:
             self.p1_roll = roll_val
-            desc = f"🎲 **{self.p1.display_name}** rolled a **{self.p1_roll}**!\n"
+            desc = f"ðŸŽ² **{self.p1.display_name}** rolled a **{self.p1_roll}**!\n"
 
             # Check if opponent is bot
             if getattr(self.p2, "bot", False):
@@ -1161,15 +1171,15 @@ class DiceDuelView(discord.ui.View):
                 self.p2_roll = bot_roll
                 bot_dice_file = self.get_dice_file(self.p2_roll)
 
-                round_desc = f"🎲 **{self.p1.display_name}** rolled a **{self.p1_roll}**\n🤖 **{self.p2.display_name}** rolled a **{self.p2_roll}**\n"
+                round_desc = f"ðŸŽ² **{self.p1.display_name}** rolled a **{self.p1_roll}**\nðŸ¤– **{self.p2.display_name}** rolled a **{self.p2_roll}**\n"
                 if self.p1_roll > self.p2_roll:
                     self.p1_score += 1
-                    round_desc += f"💥 **{self.p1.display_name}** wins Round {self.round_num}!\n"
+                    round_desc += f"ðŸ’¥ **{self.p1.display_name}** wins Round {self.round_num}!\n"
                 elif self.p2_roll > self.p1_roll:
                     self.p2_score += 1
-                    round_desc += f"💥 🤖 **{self.p2.display_name}** wins Round {self.round_num}!\n"
+                    round_desc += f"ðŸ’¥ ðŸ¤– **{self.p2.display_name}** wins Round {self.round_num}!\n"
                 else:
-                    round_desc += f"🤝 Tie! Both rolled **{self.p1_roll}** — round replayed!\n"
+                    round_desc += f"ðŸ¤ Tie! Both rolled **{self.p1_roll}** â€” round replayed!\n"
 
                 if self.p1_score >= self.target_wins or self.p2_score >= self.target_wins:
                     self.state = "finished"
@@ -1183,7 +1193,7 @@ class DiceDuelView(discord.ui.View):
 
                     embed = self.build_embed(last_desc=round_desc)
                     if bot_dice_file:
-                        embed.set_image(url=f"attachment://dice_{self.p2_roll}.png")
+                        embed.set_image(url=f"attachment://{self.get_dice_filename(self.p2_roll)}")
                         await interaction.response.edit_message(embed=embed, view=self, attachments=[bot_dice_file])
                     else:
                         await interaction.response.edit_message(embed=embed, view=self)
@@ -1194,7 +1204,7 @@ class DiceDuelView(discord.ui.View):
                     self.p2_roll = None
                     embed = self.build_embed(last_desc=round_desc)
                     if bot_dice_file:
-                        embed.set_image(url=f"attachment://dice_{self.p2_roll}.png")
+                        embed.set_image(url=f"attachment://{self.get_dice_filename(self.p2_roll)}")
                         await interaction.response.edit_message(embed=embed, view=self, attachments=[bot_dice_file])
                     else:
                         await interaction.response.edit_message(embed=embed, view=self)
@@ -1203,23 +1213,23 @@ class DiceDuelView(discord.ui.View):
             self.current_turn = 2
             embed = self.build_embed(last_desc=desc)
             if dice_file:
-                embed.set_image(url=f"attachment://dice_{roll_val}.png")
+                embed.set_image(url=f"attachment://{self.get_dice_filename(roll_val)}")
                 await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
             else:
                 await interaction.response.edit_message(embed=embed, view=self)
         else:
             # Player 2 (human) rolled -> resolve round
             self.p2_roll = roll_val
-            round_desc = f"🎲 **{self.p1.display_name}** rolled a **{self.p1_roll}**\n🎲 **{self.p2.display_name}** rolled a **{self.p2_roll}**\n"
+            round_desc = f"ðŸŽ² **{self.p1.display_name}** rolled a **{self.p1_roll}**\nðŸŽ² **{self.p2.display_name}** rolled a **{self.p2_roll}**\n"
 
             if self.p1_roll > self.p2_roll:
                 self.p1_score += 1
-                round_desc += f"💥 **{self.p1.display_name}** wins Round {self.round_num}!\n"
+                round_desc += f"ðŸ’¥ **{self.p1.display_name}** wins Round {self.round_num}!\n"
             elif self.p2_roll > self.p1_roll:
                 self.p2_score += 1
-                round_desc += f"💥 **{self.p2.display_name}** wins Round {self.round_num}!\n"
+                round_desc += f"ðŸ’¥ **{self.p2.display_name}** wins Round {self.round_num}!\n"
             else:
-                round_desc += f"🤝 Tie! Both rolled **{self.p1_roll}** — round replayed!\n"
+                round_desc += f"ðŸ¤ Tie! Both rolled **{self.p1_roll}** â€” round replayed!\n"
 
             # Check if someone reached target_wins
             if self.p1_score >= self.target_wins or self.p2_score >= self.target_wins:
@@ -1238,7 +1248,7 @@ class DiceDuelView(discord.ui.View):
 
                 embed = self.build_embed(last_desc=round_desc)
                 if dice_file:
-                    embed.set_image(url=f"attachment://dice_{roll_val}.png")
+                    embed.set_image(url=f"attachment://{self.get_dice_filename(roll_val)}")
                     await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
                 else:
                     await interaction.response.edit_message(embed=embed, view=self)
@@ -1249,7 +1259,7 @@ class DiceDuelView(discord.ui.View):
                 self.p2_roll = None
                 embed = self.build_embed(last_desc=round_desc)
                 if dice_file:
-                    embed.set_image(url=f"attachment://dice_{roll_val}.png")
+                    embed.set_image(url=f"attachment://{self.get_dice_filename(roll_val)}")
                     await interaction.response.edit_message(embed=embed, view=self, attachments=[dice_file])
                 else:
                     await interaction.response.edit_message(embed=embed, view=self)
@@ -1381,7 +1391,7 @@ async def tip(
         if wager_req > 0:
             dm_desc += f"\n*(Wager **{wager_amount:,.2f}** dices to unlock withdrawal)*"
         elif not can_withdraw:
-            dm_desc += "\n*(This tip cannot be withdrawn — play to earn real balance!)*"
+            dm_desc += "\n*(This tip cannot be withdrawn â€” play to earn real balance!)*"
         embed = discord.Embed(
             title=f"\"{interaction.user.display_name}\" Tipped You {amount:,.2f}!",
             description=dm_desc,
@@ -1396,7 +1406,7 @@ async def tip(
     if wager_req > 0:
         confirm_lines.append(f"Wager requirement set: **{wager_amount:,.2f}** dices before they can withdraw.")
     elif not can_withdraw:
-        confirm_lines.append("Recipient **cannot withdraw** this tip — promo only.")
+        confirm_lines.append("Recipient **cannot withdraw** this tip â€” promo only.")
     confirm_lines.append(f"Your remaining balance: **{sender_new:,.2f}** dices.")
     confirm_embed = discord.Embed(
         title="Tip Sent!",
@@ -1438,7 +1448,7 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
     await interaction.response.defer(ephemeral=True)
 
     try:
-        # Add as real clean balance — fully withdrawable and tippable
+        # Add as real clean balance â€” fully withdrawable and tippable
         add_balance(user.id, amount, tx_type="deposit")
 
         new_bal, _, _, _ = get_user(user.id)
@@ -1555,7 +1565,7 @@ def build_profit_html(username: str, avatar_url: str, balance: float,
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Profit — {username}</title>
+<title>Profit â€” {username}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}}
