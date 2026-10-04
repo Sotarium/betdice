@@ -36,7 +36,7 @@ export default function Home() {
           <div className="socials">
             <a
               className="social"
-              href="https://discord.gg/dejen"
+              href="https://discord.gg/JbcJUDPZGY"
               target="_blank"
               rel="noopener"
             >
