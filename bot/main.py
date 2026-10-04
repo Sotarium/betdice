@@ -633,13 +633,15 @@ async def send_deposit_dm(user: discord.User, currency: str):
             f"**{cur_label}**\n"
             f"```{addr}```\n"
             + (f"Min deposit: **${min_s:.2f}** USD\n\n" if min_s and min_s > 0 else "\n")
-            + "Wrong network = lost funds."
+            + "Wrong network = lost funds.\n*Mobile: copy address below.*"
         ),
         color=0x0498fb,
     )
     embed.set_footer(text="This is your permanent deposit address")
     try:
         await user.send(embed=embed)
+        # Send raw address as pure text so mobile users can 1-tap / hold copy instantly
+        await user.send(addr)
     except discord.Forbidden:
         pass  # DMs disabled - caller handles this
 
