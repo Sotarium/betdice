@@ -1015,7 +1015,7 @@ class DiceDuelView(discord.ui.View):
         self.bot_btn.callback = self.handle_play_bot
         self.add_item(self.bot_btn)
 
-        self.cancel_btn = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.danger, row=1)
+        self.cancel_btn = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.danger, row=0)
         self.cancel_btn.callback = self.handle_cancel
         self.add_item(self.cancel_btn)
 
@@ -1045,12 +1045,12 @@ class DiceDuelView(discord.ui.View):
             return embed
 
         turn_user = self.p1 if self.current_turn == 1 else self.p2
-        score_bar = f"**{self.p1.display_name}** ({self.p1_score}/{self.target_wins})  ⚔️  **{self.p2.display_name}** ({self.p2_score}/{self.target_wins})"
+        score_bar = f"**{self.p1.display_name}** ({self.p1_score}/{self.target_wins})  VS  **{self.p2.display_name}** ({self.p2_score}/{self.target_wins})"
 
         if self.state == "playing":
             embed = discord.Embed(
                 title=f"Dice Duel — Round {self.round_num}",
-                description=f"{score_bar}\n\n{last_desc}\n👉 Turn: **{turn_user.mention}** — click **Roll Dice**!",
+                description=f"{score_bar}\n\n{last_desc}\nTurn: **{turn_user.mention}** — click **Roll Dice**!",
                 color=0x0498fb,
             )
         else:
@@ -1058,11 +1058,11 @@ class DiceDuelView(discord.ui.View):
             winner = self.p1 if self.p1_score >= self.target_wins else self.p2
             prize = round(self.bet * 2 * 0.95, 2)
             embed = discord.Embed(
-                title="🏆 Dice Duel Champion!",
+                title="Dice Duel — Champion!",
                 description=(
                     f"{score_bar}\n\n"
-                    f"🎉 **{winner.mention}** wins the duel with **{max(self.p1_score, self.p2_score)}** win(s)!\n"
-                    f"💰 Prize: **+{prize:,.2f}** dices (1.90x)"
+                    f"**{winner.mention}** wins the duel with **{max(self.p1_score, self.p2_score)}** win(s)!\n"
+                    f"Prize: **+{prize:,.2f}** dices (1.90x)"
                 ),
                 color=0x0498fb,
             )
@@ -1128,7 +1128,7 @@ class DiceDuelView(discord.ui.View):
         self.clear_items()
         self.add_item(self.roll_btn)
 
-        embed = self.build_embed(last_desc=f"⚔️ **{self.p2.mention}** joined the duel!\nIt's **{self.p1.mention}**'s turn to roll first.")
+        embed = self.build_embed(last_desc=f"**{self.p2.mention}** joined the duel!\nIt's **{self.p1.mention}**'s turn to roll first.")
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def handle_roll(self, interaction: discord.Interaction):
