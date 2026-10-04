@@ -31,7 +31,7 @@ export default function Home() {
 
         <section className="community" aria-labelledby="community-title">
           <h2 id="community-title" className="community-title">
-            Gamble with Dicebet Bot
+            Gamble with Dicesbet Bot
           </h2>
           <div className="socials">
             <a
