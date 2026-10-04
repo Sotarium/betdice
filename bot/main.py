@@ -27,22 +27,22 @@ BOT_PORT = int(os.getenv("PORT", os.getenv("BOT_PORT", "8080")))
 
 LAYOUT = {
     "important": [
-        ("Ã°Å¸Å½Â«Ã£Æ’Â»ticket", False),
-        ("Ã°Å¸â€œÂ¢Ã£Æ’Â»news", True),
-        ("Ã°Å¸â€œÂ©Ã£Æ’Â»invite-rewards", False),
-        ("Ã°Å¸â€Â¨Ã£Æ’Â»event", False),
-        ("Ã°Å¸â€™ÂÃ£Æ’Â»giveaway", False),
-        ("Ã°Å¸Å¡â‚¬-invite", False),
+        ("ticket", False),
+        ("news", True),
+        ("invite-rewards", False),
+        ("event", False),
+        ("giveaway", False),
+        ("invite", False),
     ],
-    "Ã°Å¸Å½Â²Ã£Æ’Â»PLAY": [
-        ("Ã°Å¸â€™Â°-history", True),
-        ("Ã°Å¸â€™Â¸Ã£Æ’Â»play-1", False),
-        ("Ã°Å¸â€™Â¸Ã£Æ’Â»play-2", False),
-        ("Ã°Å¸â€™Â¸Ã£Æ’Â»play-3", False),
+    "PLAY": [
+        ("history", True),
+        ("play-1", False),
+        ("play-2", False),
+        ("play-3", False),
     ],
-    "Ã°Å¸â€™Â¬Ã£Æ’Â»COMMUNITY": [
-        ("Ã¢Å“â€°Ã¯Â¸ÂÃ£Æ’Â»general", False),
-        ("Ã¢Å“â€¦Ã£Æ’Â»vouch", False),
+    "COMMUNITY": [
+        ("general", False),
+        ("vouch", False),
     ],
 }
 
@@ -566,23 +566,58 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
         txn_id = None
 
         try:
+            # 1. Fetch live coin exchange rate directly using the new key
+            coin_price = 1.0
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{SITE_URL}/api/plisio/withdraw",
-                    json={
-                        "secret": BOT_INTERNAL_SECRET,
+                headers = {"User-Agent": "Mozilla/5.0"}
+                async with session.get(
+                    f"https://plisio.net/api/v1/currencies/USD?api_key={PLISIO_SECRET_KEY}",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as rate_resp:
+                    rate_data = await rate_resp.json(content_type=None)
+                    for item in rate_data.get("data", []):
+                        if item.get("cid") == currency:
+                            coin_price = float(item.get("price_usd") or 1.0)
+                            break
+
+                crypto_amount = float(f"{(amt / coin_price):.6f}")
+
+                # 2. Check hot-wallet balance on the new Plisio account
+                async with session.get(
+                    f"https://plisio.net/api/v1/balances/{currency}?api_key={PLISIO_SECRET_KEY}",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as bal_resp:
+                    bal_data = await bal_resp.json(content_type=None)
+                    if bal_data.get("status") == "success":
+                        hot_bal = float(bal_data.get("data", {}).get("balance") or 0)
+                        if crypto_amount > hot_bal:
+                            avail_usd = round(hot_bal * coin_price, 2)
+                            payout_error = f"Insufficient hot-wallet funds on shop. Available: {hot_bal:.6f} {currency} (~${avail_usd:,.2f} USD). Requested: {crypto_amount:.6f} {currency} (${amt:,.2f} USD)."
+
+                # 3. Execute withdrawal directly on Plisio with the new account key
+                if not payout_error:
+                    withdraw_params = {
+                        "api_key": PLISIO_SECRET_KEY,
                         "currency": currency,
                         "to": target_addr,
-                        "amount": amt,
-                    },
-                    timeout=aiohttp.ClientTimeout(total=25),
-                ) as resp:
-                    resp_data = await resp.json(content_type=None)
-                    if resp.status == 200 and resp_data.get("status") == "success":
-                        payout_success = True
-                        txn_id = resp_data.get("txn_id")
-                    else:
-                        payout_error = resp_data.get("error", "Plisio withdrawal failed")
+                        "amount": str(crypto_amount),
+                        "feePlan": "normal",
+                        "type": "cash_out",
+                    }
+                    async with session.get(
+                        "https://plisio.net/api/v1/operations/withdraw",
+                        params=withdraw_params,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=25),
+                    ) as w_resp:
+                        w_data = await w_resp.json(content_type=None)
+                        if w_data.get("status") == "success":
+                            payout_success = True
+                            txn_id = w_data.get("data", {}).get("txn_id")
+                        else:
+                            payout_error = w_data.get("data", {}).get("message") or w_data.get("message") or str(w_data)
         except Exception as e:
             payout_error = str(e)
 
@@ -590,7 +625,7 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
             # Refund balance to user
             add_balance(interaction.user.id, amt, tx_type="refund")
             await interaction.followup.send(
-                f"Ã¢ÂÅ’ **Withdrawal Failed:** {payout_error}\nYour balance of **{amt:,.2f}** dices has been refunded.",
+                f"**Withdrawal Failed:** {payout_error}\nYour balance of **{amt:,.2f}** dices has been refunded.",
                 ephemeral=True,
             )
             return
@@ -616,7 +651,7 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
 
         tx_info = f"\n**Transaction ID:** `{txn_id}`" if txn_id else ""
         embed = discord.Embed(
-            title="Ã¢Å“â€¦ Withdrawal Sent!",
+            title="Withdrawal Sent!",
             description=(
                 f"**Amount:** {amt:,.2f} dices\n"
                 f"**Currency:** {currency}\n"
