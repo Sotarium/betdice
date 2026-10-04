@@ -1007,7 +1007,7 @@ class DiceDuelView(discord.ui.View):
         self.state = "lobby"  # "lobby", "playing", "finished"
 
         # Lobby buttons
-        self.join_btn = discord.ui.Button(label=f"Join Duel ({bet:,.2f} dices)", style=discord.ButtonStyle.primary, row=0)
+        self.join_btn = discord.ui.Button(label="Join Duel", style=discord.ButtonStyle.primary, row=0)
         self.join_btn.callback = self.handle_join
         self.add_item(self.join_btn)
 
@@ -1015,7 +1015,7 @@ class DiceDuelView(discord.ui.View):
         self.bot_btn.callback = self.handle_play_bot
         self.add_item(self.bot_btn)
 
-        self.cancel_btn = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.danger, row=0)
+        self.cancel_btn = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.danger, row=1)
         self.cancel_btn.callback = self.handle_cancel
         self.add_item(self.cancel_btn)
 
