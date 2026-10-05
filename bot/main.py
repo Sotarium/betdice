@@ -1145,44 +1145,34 @@ class TowersView(discord.ui.View):
           dr=4          → Cashout button
         """
         self.clear_items()
+        # Row 0: Column pick buttons 1, 2, 3, 4
+        for col in range(self.NUM_COLS):
+            btn = discord.ui.Button(
+                label=f"Tile {col + 1}",
+                style=discord.ButtonStyle.secondary,
+                row=0,
+                disabled=self.game_over,
+            )
+            # Bind callback
+            async def make_cb(c=col):
+                async def _cb(interaction: discord.Interaction):
+                    await self.handle_pick_col(interaction, c)
+                return _cb
+            btn.callback = asyncio.iscoroutinefunction(make_cb) and None  # will assign below
+            self.add_item(btn)
 
-        for dr in range(self.VISIBLE_ROWS):
-            # tr = tower row index this discord row represents
-            # dr=3 → current, dr=2 → current+1 (above), dr=0 → current+3 (top/furthest ahead)
-            tr = self.current_row + (self.VISIBLE_ROWS - 1 - dr)
+        # Re-assign callbacks cleanly
+        for idx, item in enumerate(self.children[:self.NUM_COLS]):
+            col_target = idx
+            async def _handler(interaction: discord.Interaction, target=col_target):
+                await self.handle_pick_col(interaction, target)
+            item.callback = _handler
 
-            if self.game_over and tr == self.current_row and self.failed_row_bomb is not None:
-                # Bomb hit: show red on bomb col, gray on others
-                for col in range(self.NUM_COLS):
-                    style = discord.ButtonStyle.danger if col == self.failed_row_bomb else discord.ButtonStyle.secondary
-                    btn = discord.ui.Button(label="\u200b", style=style, row=dr, disabled=True)
-                    self.add_item(btn)
-
-            elif tr < self.current_row and tr >= 0:
-                # Already cleared row: show picked tile green, rest gray
-                picked = self.picks[tr] if tr < len(self.picks) else None
-                for col in range(self.NUM_COLS):
-                    style = discord.ButtonStyle.success if col == picked else discord.ButtonStyle.secondary
-                    btn = discord.ui.Button(label="\u200b", style=style, row=dr, disabled=True)
-                    self.add_item(btn)
-
-            elif tr == self.current_row and not self.game_over:
-                # Active row — clickable buttons
-                for col in range(self.NUM_COLS):
-                    btn = TowersButton(col=col, discord_row=dr)
-                    self.add_item(btn)
-
-            else:
-                # Future row (above current) or cleared rows with no history — gray locked
-                for col in range(self.NUM_COLS):
-                    btn = discord.ui.Button(label="\u200b", style=discord.ButtonStyle.secondary, row=dr, disabled=True)
-                    self.add_item(btn)
-
-        # Cashout on row 4
+        # Row 1: Cashout button
         cashout = discord.ui.Button(
             label=f"Cashout ({self.current_payout:,.2f})" if not self.game_over else "Cashout",
             style=discord.ButtonStyle.success,
-            row=4,
+            row=1,
             disabled=(self.current_row == 0 or self.game_over),
         )
         cashout.callback = self._cashout_callback
@@ -1200,40 +1190,77 @@ class TowersView(discord.ui.View):
         mult = self.current_multiplier
         next_mult = get_towers_multiplier(self.current_row + 1, self.NUM_COLS)
 
+        # Build ASCII / visual tile tower (top to bottom)
+        tower_lines = []
+        for r in range(self.total_rows - 1, -1, -1):
+            row_emojis = []
+            for c in range(self.NUM_COLS):
+                if r < self.current_row:
+                    # Cleared row: green on user's pick, black/gray elsewhere
+                    if r < len(self.picks) and c == self.picks[r]:
+                        row_emojis.append("🟩")
+                    else:
+                        row_emojis.append("⬛")
+                elif r == self.current_row:
+                    if self.game_over and self.failed_row_bomb is not None:
+                        if c == self.failed_row_bomb:
+                            row_emojis.append("🟥")
+                        else:
+                            row_emojis.append("⬛")
+                    else:
+                        # Active row awaiting selection
+                        row_emojis.append("🟨")
+                else:
+                    # Future row
+                    row_emojis.append("⬛")
+
+            # Row indicator arrow for active row
+            prefix = "▶ " if (r == self.current_row and not self.game_over) else "  "
+            tower_lines.append(f"`{prefix}L{r+1:02d}` " + " ".join(row_emojis))
+
+        tower_display = "\n".join(tower_lines)
+
         if status == "active":
             desc = (
-                f"Level **{self.current_row}/{self.total_rows}** cleared\n"
-                f"Current: **{mult:.2f}x** ({self.current_payout:,.2f} dices)\n"
-                f"Next: **{next_mult:.2f}x**\n\n"
-                f"Pick a tile. One hides the bomb!"
+                f"**Bet:** {self.bet_amount:,.2f} dices\n"
+                f"**Current:** **{mult:.2f}x** ({self.current_payout:,.2f} dices)\n"
+                f"**Next:** **{next_mult:.2f}x**\n\n"
+                f"**Tower:**\n{tower_display}\n\n"
+                f"*Select a column below (1–4) to climb!*"
             )
             title = "Towers"
             color = 0x0498fb
         elif status == "win":
             desc = (
-                f"Cashed out at level **{self.current_row}/{self.total_rows}**\n"
-                f"**{mult:.2f}x** - +{cashout_amt:,.2f} dices"
+                f"**Bet:** {self.bet_amount:,.2f} dices\n"
+                f"**Cashed Out:** **+{cashout_amt:,.2f} dices** ({mult:.2f}x)\n"
+                f"**Levels Cleared:** {self.current_row}/{self.total_rows}\n\n"
+                f"**Tower:**\n{tower_display}"
             )
             title = "Towers - Cashed Out"
             color = 0x00cc44
         elif status == "cleared":
             desc = (
-                f"All **{self.total_rows}** levels cleared!\n"
-                f"**{mult:.2f}x** - +{cashout_amt:,.2f} dices"
+                f"**Bet:** {self.bet_amount:,.2f} dices\n"
+                f"**All {self.total_rows} Levels Cleared!**\n"
+                f"**Won:** **+{cashout_amt:,.2f} dices** ({mult:.2f}x)\n\n"
+                f"**Tower:**\n{tower_display}"
             )
             title = "Towers - Top Reached!"
             color = 0x00cc44
         else:  # bomb
             desc = (
-                f"Bomb on level **{self.current_row + 1}**!\n"
-                f"Lost **{self.bet_amount:,.2f}** dices - {self.current_row} levels cleared"
+                f"**Bet:** {self.bet_amount:,.2f} dices\n"
+                f"**Bomb on Level {self.current_row + 1}!**\n"
+                f"**Lost:** {self.bet_amount:,.2f} dices ({self.current_row} levels cleared)\n\n"
+                f"**Tower:**\n{tower_display}"
             )
             title = "Towers - Bomb Hit"
             color = 0xff3333
 
         return discord.Embed(title=title, description=desc, color=color)
 
-    async def handle_pick(self, interaction: discord.Interaction, button: TowersButton):
+    async def handle_pick_col(self, interaction: discord.Interaction, col: int):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("This is not your game.", ephemeral=True)
             return
@@ -1241,7 +1268,6 @@ class TowersView(discord.ui.View):
             await interaction.response.defer()
             return
 
-        col = button.col
         bomb_col = self.bomb_cols[self.current_row]
         record_towers_hover(self.user_id, col)
 
