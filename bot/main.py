@@ -86,6 +86,13 @@ class SetupBot(discord.Client):
         await refund_orphaned_games()
         if not self.guilds:
             print("Bot is NOT in any server. Re-invite it with the OAuth2 URL.")
+        # Sync only to specific guilds to prevent duplicates and enable instant updates
+        try:
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync(guild=None)
+        except Exception:
+            pass
+
         for guild in self.guilds:
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
@@ -179,6 +186,11 @@ db.execute(
     "CREATE TABLE IF NOT EXISTS processed_deposits ("
     "operation_id TEXT PRIMARY KEY, user_id INTEGER, amount REAL, created_at REAL)"
 )
+db.execute(
+    "CREATE TABLE IF NOT EXISTS towers_hovers ("
+    "user_id INTEGER, col_index INTEGER, count INTEGER DEFAULT 0, "
+    "PRIMARY KEY (user_id, col_index))"
+)
 db.commit()
 
 
@@ -218,10 +230,8 @@ async def refund_orphaned_games():
     db.commit()
     print(f"[Startup] Refunds complete.")
 
-
-
-def record_mines_click(user_id: int, tile_index: int):
-    """Track which tile a player clicked (safe tiles only)."""
+def record_mines_hover(user_id: int, tile_index: int):
+    """Track which tiles the player clicks in Mines (used for 7% hover bias)."""
     db.execute(
         "INSERT INTO mines_clicks (user_id, tile_index, count) VALUES (?, ?, 1) "
         "ON CONFLICT(user_id, tile_index) DO UPDATE SET count = count + 1",
@@ -232,10 +242,9 @@ def record_mines_click(user_id: int, tile_index: int):
 
 def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set:
     """
-    Bias bomb placement based on player click history.
-    - If player has a pattern: bomb is 25% more likely in their top tiles.
-    - If player clicks randomly: 50/50 split between two alternating zones.
-    - If not enough history: pure random.
+    Bias bomb placement based on player click/hover history.
+    Tiles the player tends to click get +7% extra bomb probability weight.
+    If not enough history: pure random.
     """
     rows = db.execute(
         "SELECT tile_index, count FROM mines_clicks WHERE user_id = ? AND tile_index < ?",
@@ -244,46 +253,19 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
 
     total_clicks = sum(r[1] for r in rows)
 
-    if total_clicks < 10:
-        # Not enough data - pure random
+    if total_clicks < 5:
         return set(random.sample(range(total_tiles), bombs))
 
-    # Build weight array
+    hover_counts = {r[0]: r[1] for r in rows}
     uniform = 1.0 / total_tiles
-    weights = [uniform] * total_tiles
-    for tile_idx, count in rows:
-        freq = count / total_clicks
-        weights[tile_idx] = freq
+    biased_weights = []
+    for i in range(total_tiles):
+        if i in hover_counts:
+            freq = hover_counts[i] / total_clicks
+            biased_weights.append(uniform + freq * 0.07)
+        else:
+            biased_weights.append(uniform)
 
-    # Detect if player has a pattern (high variance) or is random (low variance)
-    avg = sum(weights) / len(weights)
-    variance = sum((w - avg) ** 2 for w in weights) / len(weights)
-    random_threshold = (uniform ** 2) * 0.3  # low variance = random
-
-    if variance <= random_threshold:
-        # Random player - 50/50 between two alternating zones
-        # Zone A: even tile indices (cols 0,2,4 per row)
-        # Zone B: odd tile indices (cols 1,3 per row)
-        zone = random.randint(0, 1)  # 0=even zone, 1=odd zone
-        zone_tiles = [i for i in range(total_tiles) if i % 2 == zone]
-        other_tiles = [i for i in range(total_tiles) if i % 2 != zone]
-        # 60% weight on chosen zone tiles, 40% on others
-        biased_weights = []
-        for i in range(total_tiles):
-            if i in zone_tiles:
-                biased_weights.append(0.6 / len(zone_tiles))
-            else:
-                biased_weights.append(0.4 / len(other_tiles))
-    else:
-        # Pattern player - boost their top tiles by 25%
-        biased_weights = []
-        for w in weights:
-            if w > uniform:
-                biased_weights.append(w * 1.25)  # 25% boost on preferred tiles
-            else:
-                biased_weights.append(w)
-
-    # Weighted sampling without replacement for bomb positions
     bomb_positions = set()
     available = list(range(total_tiles))
     avail_weights = list(biased_weights)
@@ -297,7 +279,6 @@ def get_biased_bomb_positions(user_id: int, total_tiles: int, bombs: int) -> set
         avail_weights.pop(idx)
 
     return bomb_positions
-
 
 
 def log_tx(uid: int, tx_type: str, amount: float):
@@ -592,9 +573,17 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
                     bal_data = await bal_resp.json(content_type=None)
                     if bal_data.get("status") == "success":
                         hot_bal = float(bal_data.get("data", {}).get("balance") or 0)
-                        if crypto_amount > hot_bal:
-                            avail_usd = round(hot_bal * coin_price, 2)
-                            payout_error = f"Insufficient hot-wallet funds on shop. Available: {hot_bal:.6f} {currency} (~${avail_usd:,.2f} USD). Requested: {crypto_amount:.6f} {currency} (${amt:,.2f} USD)."
+                        # Reserve network gas fee (0.00002 for SOL, 0.0001 for LTC) plus 0.5% Plisio payout commission
+                        fee_buffer = 0.00003 if currency == "SOL" else 0.0001
+                        max_withdrawable = max(0.0, (hot_bal - fee_buffer) * 0.995)
+
+                        if crypto_amount > max_withdrawable:
+                            # If user is withdrawing all or near all available, cap to the exact maximum withdrawable
+                            if crypto_amount <= hot_bal and max_withdrawable > 0:
+                                crypto_amount = float(f"{max_withdrawable:.6f}")
+                            else:
+                                avail_usd = round(max_withdrawable * coin_price, 2)
+                                payout_error = f"Insufficient hot-wallet funds on shop. Available to withdraw: {max_withdrawable:.6f} {currency} (~${avail_usd:,.2f} USD)."
 
                 # 3. Execute withdrawal directly on Plisio with the new account key
                 if not payout_error:
@@ -602,7 +591,7 @@ class WithdrawModal(discord.ui.Modal, title="Withdraw"):
                         "api_key": PLISIO_SECRET_KEY,
                         "currency": currency,
                         "to": target_addr,
-                        "amount": str(crypto_amount),
+                        "amount": f"{crypto_amount:.6f}",
                         "feePlan": "normal",
                         "type": "cash_out",
                     }
@@ -900,7 +889,7 @@ class MinesView(discord.ui.View):
             embed = discord.Embed(
                 title="Bomb Hit",
                 description=(
-                    f"Lost **{self.bet_amount:,.2f}** dices Â· {revealed_count} tiles cleared"
+                    f"Lost **{self.bet_amount:,.2f}** dices - {revealed_count} tiles cleared"
                 ),
                 color=0x0498fb,
             )
@@ -945,7 +934,7 @@ class MinesView(discord.ui.View):
 
         # Safe tile found
         self.revealed_indices.add(idx)
-        record_mines_click(self.user_id, idx)  # track click for pattern analysis
+        record_mines_hover(self.user_id, idx)  # track click for 7% hover bias
         button.style = discord.ButtonStyle.success
         button.label = "\u200b"
         button.disabled = True
@@ -1051,7 +1040,301 @@ async def mines(
     await interaction.response.send_message(embed=embed, view=view)
 
 
+# ─────────────────────────────── TOWERS GAMEMODE ────────────────────────────
+
+
+def record_towers_hover(user_id: int, col_index: int):
+    """Track which column the player picks in Towers (for 7% bomb bias)."""
+    db.execute(
+        "INSERT INTO towers_hovers (user_id, col_index, count) VALUES (?, ?, 1) "
+        "ON CONFLICT(user_id, col_index) DO UPDATE SET count = count + 1",
+        (user_id, col_index),
+    )
+    db.commit()
+
+
+def get_towers_bomb_col(user_id: int, num_cols: int) -> int:
+    """
+    Pick which column hides the bomb for a Towers row.
+    Columns the player tends to pick get +7% extra bomb probability.
+    """
+    rows = db.execute(
+        "SELECT col_index, count FROM towers_hovers WHERE user_id = ? AND col_index < ?",
+        (user_id, num_cols),
+    ).fetchall()
+
+    total = sum(r[1] for r in rows)
+    if total < 4:
+        return random.randint(0, num_cols - 1)
+
+    hover_counts = {r[0]: r[1] for r in rows}
+    uniform = 1.0 / num_cols
+    weights = []
+    for i in range(num_cols):
+        if i in hover_counts:
+            freq = hover_counts[i] / total
+            weights.append(uniform + freq * 0.07)
+        else:
+            weights.append(uniform)
+
+    total_w = sum(weights)
+    norm = [w / total_w for w in weights]
+    return random.choices(range(num_cols), weights=norm, k=1)[0]
+
+
+def get_towers_multiplier(rows_cleared: int, num_cols: int) -> float:
+    """
+    Multiplier for Towers - same formula as Mines (0.95 / survival_probability).
+    Each row the player picks 1 safe tile out of num_cols.
+    Survival probability after N rows = C(num_cols-1, 1)^N / C(num_cols, 1)^N
+                                      = ((num_cols-1)/num_cols)^N
+    Same 5% house edge as Mines.
+    """
+    if rows_cleared == 0:
+        return 1.0
+    safe_prob = ((num_cols - 1) / num_cols) ** rows_cleared
+    return round(0.95 / safe_prob, 2)
+
+
+class TowersButton(discord.ui.Button):
+    def __init__(self, col: int, discord_row: int):
+        super().__init__(
+            label="\u200b",
+            style=discord.ButtonStyle.secondary,
+            row=discord_row,
+        )
+        self.col = col
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.view.handle_pick(interaction, self)
+
+
+class TowersView(discord.ui.View):
+    NUM_COLS = 4
+    VISIBLE_ROWS = 4  # how many tower rows to show at once (Discord rows 0-3)
+
+    def __init__(self, user_id: int, bet_amount: float, total_rows: int = 8):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.bet_amount = bet_amount
+        self.total_rows = total_rows
+        self.current_row = 0
+        self.game_over = False
+        self.picks: list[int] = []           # which col was picked per cleared row
+        self.failed_row_bomb: int | None = None  # bomb col revealed on death
+
+        # Pre-generate bomb column for every row
+        self.bomb_cols = [
+            get_towers_bomb_col(user_id, self.NUM_COLS)
+            for _ in range(total_rows)
+        ]
+        self._build_buttons()
+
+    def _build_buttons(self):
+        """
+        Render a 4-row tower grid + cashout button.
+        Discord row 3 (bottom) = current active level.
+        Discord rows 0-2 (above) = next levels to climb (gray locked)
+        OR cleared rows shown with picked tile green.
+
+        Layout (dr = discord row, tr = tower row):
+          dr=0 (top)    → tr = current_row + 3  (3 levels ahead)
+          dr=1          → tr = current_row + 2
+          dr=2          → tr = current_row + 1  (1 level ahead)
+          dr=3 (bottom) → tr = current_row      (active)
+          dr=4          → Cashout button
+        """
+        self.clear_items()
+
+        for dr in range(self.VISIBLE_ROWS):
+            # tr = tower row index this discord row represents
+            # dr=3 → current, dr=2 → current+1 (above), dr=0 → current+3 (top/furthest ahead)
+            tr = self.current_row + (self.VISIBLE_ROWS - 1 - dr)
+
+            if self.game_over and tr == self.current_row and self.failed_row_bomb is not None:
+                # Bomb hit: show red on bomb col, gray on others
+                for col in range(self.NUM_COLS):
+                    style = discord.ButtonStyle.danger if col == self.failed_row_bomb else discord.ButtonStyle.secondary
+                    btn = discord.ui.Button(label="\u200b", style=style, row=dr, disabled=True)
+                    self.add_item(btn)
+
+            elif tr < self.current_row and tr >= 0:
+                # Already cleared row: show picked tile green, rest gray
+                picked = self.picks[tr] if tr < len(self.picks) else None
+                for col in range(self.NUM_COLS):
+                    style = discord.ButtonStyle.success if col == picked else discord.ButtonStyle.secondary
+                    btn = discord.ui.Button(label="\u200b", style=style, row=dr, disabled=True)
+                    self.add_item(btn)
+
+            elif tr == self.current_row and not self.game_over:
+                # Active row — clickable buttons
+                for col in range(self.NUM_COLS):
+                    btn = TowersButton(col=col, discord_row=dr)
+                    self.add_item(btn)
+
+            else:
+                # Future row (above current) or cleared rows with no history — gray locked
+                for col in range(self.NUM_COLS):
+                    btn = discord.ui.Button(label="\u200b", style=discord.ButtonStyle.secondary, row=dr, disabled=True)
+                    self.add_item(btn)
+
+        # Cashout on row 4
+        cashout = discord.ui.Button(
+            label=f"Cashout ({self.current_payout:,.2f})" if not self.game_over else "Cashout",
+            style=discord.ButtonStyle.success,
+            row=4,
+            disabled=(self.current_row == 0 or self.game_over),
+        )
+        cashout.callback = self._cashout_callback
+        self.add_item(cashout)
+
+    @property
+    def current_multiplier(self) -> float:
+        return get_towers_multiplier(self.current_row, self.NUM_COLS)
+
+    @property
+    def current_payout(self) -> float:
+        return round(self.bet_amount * self.current_multiplier, 2)
+
+    def get_embed(self, status: str = "active", cashout_amt: float = None) -> discord.Embed:
+        mult = self.current_multiplier
+        next_mult = get_towers_multiplier(self.current_row + 1, self.NUM_COLS)
+
+        if status == "active":
+            desc = (
+                f"Level **{self.current_row}/{self.total_rows}** cleared\n"
+                f"Current: **{mult:.2f}x** ({self.current_payout:,.2f} dices)\n"
+                f"Next: **{next_mult:.2f}x**\n\n"
+                f"Pick a tile. One hides the bomb!"
+            )
+            title = "Towers"
+            color = 0x0498fb
+        elif status == "win":
+            desc = (
+                f"Cashed out at level **{self.current_row}/{self.total_rows}**\n"
+                f"**{mult:.2f}x** - +{cashout_amt:,.2f} dices"
+            )
+            title = "Towers - Cashed Out"
+            color = 0x00cc44
+        elif status == "cleared":
+            desc = (
+                f"All **{self.total_rows}** levels cleared!\n"
+                f"**{mult:.2f}x** - +{cashout_amt:,.2f} dices"
+            )
+            title = "Towers - Top Reached!"
+            color = 0x00cc44
+        else:  # bomb
+            desc = (
+                f"Bomb on level **{self.current_row + 1}**!\n"
+                f"Lost **{self.bet_amount:,.2f}** dices - {self.current_row} levels cleared"
+            )
+            title = "Towers - Bomb Hit"
+            color = 0xff3333
+
+        return discord.Embed(title=title, description=desc, color=color)
+
+    async def handle_pick(self, interaction: discord.Interaction, button: TowersButton):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your game.", ephemeral=True)
+            return
+        if self.game_over:
+            await interaction.response.defer()
+            return
+
+        col = button.col
+        bomb_col = self.bomb_cols[self.current_row]
+        record_towers_hover(self.user_id, col)
+
+        if col == bomb_col:
+            # Bomb hit
+            self.game_over = True
+            self.failed_row_bomb = bomb_col
+            self._build_buttons()
+            embed = self.get_embed(status="bomb")
+            await interaction.response.edit_message(embed=embed, view=self)
+            end_active_game(self.user_id)
+            asyncio.create_task(sync_website_deposit(
+                self.user_id, -self.bet_amount, get_user(self.user_id)[0]
+            ))
+            return
+
+        # Safe tile picked
+        self.picks.append(col)
+        self.current_row += 1
+
+        if self.current_row >= self.total_rows:
+            # All rows cleared
+            self.game_over = True
+            payout = self.current_payout
+            add_balance(self.user_id, payout)
+            self._build_buttons()
+            embed = self.get_embed(status="cleared", cashout_amt=payout)
+            await interaction.response.edit_message(embed=embed, view=self)
+            end_active_game(self.user_id)
+            asyncio.create_task(sync_website_deposit(
+                self.user_id, payout - self.bet_amount, get_user(self.user_id)[0]
+            ))
+            return
+
+        self._build_buttons()
+        embed = self.get_embed(status="active")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _cashout_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your game.", ephemeral=True)
+            return
+        if self.game_over or self.current_row == 0:
+            await interaction.response.defer()
+            return
+
+        self.game_over = True
+        payout = self.current_payout
+        add_balance(self.user_id, payout)
+        self._build_buttons()
+        embed = self.get_embed(status="win", cashout_amt=payout)
+        await interaction.response.edit_message(embed=embed, view=self)
+        end_active_game(self.user_id)
+        asyncio.create_task(sync_website_deposit(
+            self.user_id, payout - self.bet_amount, get_user(self.user_id)[0]
+        ))
+
+
+@bot.tree.command(name="towers", description="Play Towers. Pick the safe tile each row and climb. 4 tiles, 1 bomb per row.")
+@app_commands.describe(
+    amount="Bet amount in dices",
+    rows="Number of rows to climb (3 to 10, default 8)",
+)
+async def towers(
+    interaction: discord.Interaction,
+    amount: float,
+    rows: int = 8,
+):
+    if amount <= 0:
+        await interaction.response.send_message("Bet amount must be greater than 0.", ephemeral=True)
+        return
+    if rows < 3 or rows > 10:
+        await interaction.response.send_message("Rows must be between 3 and 10.", ephemeral=True)
+        return
+
+    total_bal = get_total_balance(interaction.user.id)
+    if amount > total_bal:
+        await interaction.response.send_message(
+            f"Not enough balance. You have **{total_bal:,.2f}** dices.",
+            ephemeral=True,
+        )
+        return
+
+    add_balance(interaction.user.id, -amount)
+    start_active_game(interaction.user.id, "Towers", amount)
+
+    view = TowersView(user_id=interaction.user.id, bet_amount=amount, total_rows=rows)
+    embed = view.get_embed(status="active")
+    await interaction.response.send_message(embed=embed, view=view)
+
+
 DICE_FACES_DIR = os.path.join(os.path.dirname(__file__), "assets", "dice")
+
 
 
 class DiceDuelView(discord.ui.View):
@@ -1372,6 +1655,7 @@ ALLOWED_TIPPER_ID = 1079074717799030824
 
 
 @bot.tree.command(name="tip", description="Tip dices to another user")
+@app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     user="The user to tip",
     amount="Amount of dices to tip",
@@ -1470,6 +1754,7 @@ async def clearall(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="add", description="Add withdrawable balance to a user")
+@app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     user="The user to give balance to",
     amount="Amount of dices to add",
@@ -1514,6 +1799,7 @@ async def add_cmd(interaction: discord.Interaction, user: discord.Member, amount
 
 
 @bot.tree.command(name="remove", description="Remove balance from a user")
+@app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     user="The user to remove balance from",
     amount="Amount of dices to remove",
@@ -1550,6 +1836,7 @@ async def remove_cmd(interaction: discord.Interaction, user: discord.Member, amo
 
 
 @bot.tree.command(name="clear", description="[Owner] Clear a user's profit history")
+@app_commands.default_permissions(administrator=True)
 @app_commands.describe(user="The user whose profit history to clear")
 async def clear_cmd(interaction: discord.Interaction, user: discord.Member):
     if interaction.user.id != ALLOWED_TIPPER_ID:
@@ -1841,7 +2128,7 @@ async def generate_profit_card(target: discord.Member) -> io.BytesIO:
 
 
 
-@bot.tree.command(name="profit", description="Show a user's profit card with chart and history")
+@bot.tree.command(name="view-profit", description="Show a user's profit card with chart and history")
 @app_commands.describe(user="The user to check profit for")
 async def profit_cmd(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.defer()
