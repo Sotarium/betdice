@@ -1208,8 +1208,7 @@ class TowersView(discord.ui.View):
                         else:
                             row_emojis.append("⬛")
                     else:
-                        # Active row awaiting selection
-                        row_emojis.append("🟨")
+                        row_emojis.append("⬛")
                 else:
                     # Future row
                     row_emojis.append("⬛")
