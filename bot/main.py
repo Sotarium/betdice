@@ -86,16 +86,21 @@ class SetupBot(discord.Client):
         await refund_orphaned_games()
         if not self.guilds:
             print("Bot is NOT in any server. Re-invite it with the OAuth2 URL.")
+        # Clear guild-specific commands so only single global commands exist
         for guild in self.guilds:
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            print(f"Commands synced to: {guild.name}")
+            try:
+                self.tree.clear_commands(guild=guild)
+                await self.tree.sync(guild=guild)
+            except Exception:
+                pass
             try:
                 await ensure_dice_emoji(guild)
             except Exception as e:
                 print(f"Could not create dice emoji in {guild.name}: {e}")
+
+        # Single global sync
         await self.tree.sync()
-        print("[Sync] Global commands synced.")
+        print("[Sync] Single global command registration complete.")
 
 
 bot = SetupBot()
