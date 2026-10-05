@@ -1749,19 +1749,14 @@ async def tip(
     except Exception as e:
         print(f"[Tip DM Error] Could not DM user {user.id}: {e}")
 
-    # Confirm in channel
-    confirm_lines = [f"Successfully tipped **{amount:,.2f}** dices to {user.mention}."]
-    if wager_req > 0:
-        confirm_lines.append(f"Wager requirement set: **{wager_amount:,.2f}** dices before they can withdraw.")
-    elif not can_withdraw:
-        confirm_lines.append("Recipient **cannot withdraw** this tip - promo only.")
-    confirm_lines.append(f"Your remaining balance: **{sender_new:,.2f}** dices.")
+    # Announce in chat
+    public_msg = f"**{interaction.user.display_name}** Tipped **{amount:,.2f}** dices To **{user.display_name}**!"
     confirm_embed = discord.Embed(
-        title="Tip Sent!",
-        description="\n".join(confirm_lines),
+        title=f"{interaction.user.display_name} Tipped {amount:,.2f} Dices To {user.display_name}!",
+        description=f"{interaction.user.mention} sent a tip of **{amount:,.2f}** dices to {user.mention}!",
         color=0x0498fb,
     )
-    await interaction.response.send_message(embed=confirm_embed, ephemeral=True)
+    await interaction.response.send_message(content=f"{interaction.user.mention} tipped **{amount:,.2f}** dices to {user.mention}!", embed=confirm_embed, ephemeral=False)
 
 
 @bot.tree.command(name="clearall", description="Reset ALL user balances to 0")
