@@ -764,9 +764,9 @@ async def bal(interaction: discord.Interaction, user: discord.Member = None):
 
     desc = f"{dice_emoji(interaction.guild)} **{total:,.2f}** dices"
     if promo > 0:
-        desc += f"\nâ€¢ Withdrawable: **{bal:,.2f}** dices\nâ€¢ Non-withdrawable: **{promo:,.2f}** dices"
+        desc += f"\n- Withdrawable: **{bal:,.2f}** dices\n- Non-withdrawable: **{promo:,.2f}** dices"
     if wager_req > 0:
-        desc += f"\nâ€¢ Wager Required: **{wager_req:,.2f}** dices"
+        desc += f"\n- Wager Required: **{wager_req:,.2f}** dices"
 
     embed = discord.Embed(
         title=title,
@@ -1138,11 +1138,11 @@ class TowersView(discord.ui.View):
         OR cleared rows shown with picked tile green.
 
         Layout (dr = discord row, tr = tower row):
-          dr=0 (top)    → tr = current_row + 3  (3 levels ahead)
-          dr=1          → tr = current_row + 2
-          dr=2          → tr = current_row + 1  (1 level ahead)
-          dr=3 (bottom) → tr = current_row      (active)
-          dr=4          → Cashout button
+          dr=0 (top)    -> tr = current_row + 3  (3 levels ahead)
+          dr=1          -> tr = current_row + 2
+          dr=2          -> tr = current_row + 1  (1 level ahead)
+          dr=3 (bottom) -> tr = current_row      (active)
+          dr=4          -> Cashout button
         """
         self.clear_items()
         # Row 0: 4 clickable tile buttons matching Mines tile styling
@@ -1226,7 +1226,7 @@ class TowersView(discord.ui.View):
                 f"**Current:** **{mult:.2f}x** ({self.current_payout:,.2f} dices)\n"
                 f"**Next:** **{next_mult:.2f}x**\n\n"
                 f"**Tower:**\n{tower_display}\n\n"
-                f"*Select a column below (1–4) to climb!*"
+                f"*Select a column below (1-4) to climb!*"
             )
             title = "Towers"
             color = 0x0498fb
