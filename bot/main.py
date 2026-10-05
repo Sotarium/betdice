@@ -1145,10 +1145,10 @@ class TowersView(discord.ui.View):
           dr=4          → Cashout button
         """
         self.clear_items()
-        # Row 0: Column pick buttons 1, 2, 3, 4
+        # Row 0: 4 clickable tile buttons matching Mines tile styling
         for col in range(self.NUM_COLS):
             btn = discord.ui.Button(
-                label=f"Tile {col + 1}",
+                label="\u200b",
                 style=discord.ButtonStyle.secondary,
                 row=0,
                 disabled=self.game_over,
@@ -1190,7 +1190,7 @@ class TowersView(discord.ui.View):
         mult = self.current_multiplier
         next_mult = get_towers_multiplier(self.current_row + 1, self.NUM_COLS)
 
-        # Build ASCII / visual tile tower (top to bottom)
+        # Build clean visual tile tower (top to bottom)
         tower_lines = []
         for r in range(self.total_rows - 1, -1, -1):
             row_emojis = []
@@ -1216,9 +1216,7 @@ class TowersView(discord.ui.View):
                     # Future row
                     row_emojis.append("⬛")
 
-            # Row indicator arrow for active row
-            prefix = "▶ " if (r == self.current_row and not self.game_over) else "  "
-            tower_lines.append(f"`{prefix}L{r+1:02d}` " + " ".join(row_emojis))
+            tower_lines.append(" ".join(row_emojis))
 
         tower_display = "\n".join(tower_lines)
 
