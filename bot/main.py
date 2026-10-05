@@ -86,13 +86,6 @@ class SetupBot(discord.Client):
         await refund_orphaned_games()
         if not self.guilds:
             print("Bot is NOT in any server. Re-invite it with the OAuth2 URL.")
-        # Sync only to specific guilds to prevent duplicates and enable instant updates
-        try:
-            self.tree.clear_commands(guild=None)
-            await self.tree.sync(guild=None)
-        except Exception:
-            pass
-
         for guild in self.guilds:
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
@@ -101,6 +94,8 @@ class SetupBot(discord.Client):
                 await ensure_dice_emoji(guild)
             except Exception as e:
                 print(f"Could not create dice emoji in {guild.name}: {e}")
+        await self.tree.sync()
+        print("[Sync] Global commands synced.")
 
 
 bot = SetupBot()
