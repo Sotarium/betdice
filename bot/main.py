@@ -1196,9 +1196,12 @@ class TowersView(discord.ui.View):
             row_emojis = []
             for c in range(self.NUM_COLS):
                 if r < self.current_row:
-                    # Cleared row: green on user's pick, black/gray elsewhere
+                    # Cleared row: green on safe pick, red on where the bomb was, black elsewhere
+                    bomb_col = self.bomb_cols[r]
                     if r < len(self.picks) and c == self.picks[r]:
                         row_emojis.append("🟩")
+                    elif c == bomb_col:
+                        row_emojis.append("🟥")
                     else:
                         row_emojis.append("⬛")
                 elif r == self.current_row:
