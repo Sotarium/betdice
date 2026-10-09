@@ -1372,12 +1372,12 @@ class DiceDuelView(discord.ui.View):
         self.target_wins = target_wins
         self.p1_score = 0
         self.p2_score = 0
-        self.current_turn = 1  # 1 for p1, 2 for p2
+        self.cursed = False  # Cursed mode: lowest roll wins
         self.round_num = 1
         self.p1_roll = None
         self.p2_roll = None
         self.state = "lobby"  # "lobby", "playing", "finished"
-        self.message: discord.Message = None  # set after send_message so we can delete it
+        self.message: discord.Message = None
 
         # Lobby buttons
         self.join_btn = discord.ui.Button(label="Join Duel", style=discord.ButtonStyle.primary, row=0)
@@ -1407,42 +1407,124 @@ class DiceDuelView(discord.ui.View):
             return f"dice_roll_{roll}.gif"
         return f"dice_{roll}.png"
 
+    def _score_dots(self, score: int) -> str:
+        return "🟣" * score + "⚫" * (self.target_wins - score)
+
+    def _dice_face(self, roll) -> str:
+        if roll is None:
+            return "⏳"
+        faces = {1: "⚀", 2: "⚁", 3: "⚂", 4: "⚃", 5: "⚄", 6: "⚅"}
+        return f"{faces.get(roll, '🎲')} **{roll}**"
+
+    def _mode_label(self) -> str:
+        return "☠️ Cursed - lowest roll wins" if self.cursed else "Free-for-all"
+
     def build_embed(self, last_desc: str = "") -> discord.Embed:
+        prize = round(self.bet * 2 * 0.95, 2)
+
+        # ── LOBBY ──
         if self.state == "lobby":
-            embed = discord.Embed(
-                title="Dice Duel Challenge!",
-                description=(
-                    f"**Challenger:** {self.p1.mention}\n"
-                    f"**Entry Bet:** **{self.bet:,.2f}** dices each\n"
-                    f"**First To:** **{self.target_wins}** win(s)\n"
-                    f"**Prize:** **{(self.bet * 2 * 0.95):,.2f}** dices\n\n"
-                    f"*Click **Join Duel** to accept or **Call Bot**!*"
+            mode_txt = "\n> ☠️ **Cursed Mode** active - lowest roll wins the pot!" if self.cursed else ""
+            embed = discord.Embed(color=0x676fff)
+            embed.set_author(name="DICE DUELS", icon_url="https://i.imgur.com/jNKCFwO.png")
+            embed.add_field(
+                name="*may numbers decide the winner..*",
+                value=(
+                    f"> **Stake:** `{self.bet:,.2f}` dices each\n"
+                    f"> **Pot:** `{self.bet * 2:,.2f}` dices  ->  **Payout:** `{prize:,.2f}` (1.90x)\n"
+                    f"> **Target:** First to **{self.target_wins}** win(s)  |  **Mode:** {self._mode_label()}"
+                    f"{mode_txt}"
                 ),
-                color=0x0498fb,
+                inline=False,
             )
+            embed.add_field(
+                name="Seats  [1 / 2 filled]",
+                value=(
+                    f"🟣  **Seat 1** - {self.p1.mention}\n"
+                    f"⬜  **Seat 2** - *Waiting for a challenger...*"
+                ),
+                inline=False,
+            )
+            embed.set_footer(text="Click 'Join Duel' to accept - or 'Call Bot' to play solo - Settled instantly")
             return embed
 
-        score_bar = f"**{self.p1.display_name}** ({self.p1_score}/{self.target_wins})  VS  **{self.p2.display_name}** ({self.p2_score}/{self.target_wins})"
+        # ── PLAYING / FINISHED ──
+        p1_name = self.p1.display_name
+        p2_name = self.p2.display_name if self.p2 else "Opponent"
+        p1_dots = self._score_dots(self.p1_score)
+        p2_dots = self._score_dots(self.p2_score)
+        p1_face = self._dice_face(self.p1_roll)
+        p2_face = self._dice_face(self.p2_roll)
 
         if self.state == "playing":
-            embed = discord.Embed(
-                title=f"Dice Duel - Round {self.round_num}",
-                description=f"{score_bar}\n\n{last_desc}",
-                color=0x0498fb,
+            embed = discord.Embed(color=0x676fff)
+            embed.set_author(
+                name=f"DICE DUELS - Round {self.round_num}",
+                icon_url="https://i.imgur.com/jNKCFwO.png",
             )
-        else:
-            # finished
-            winner = self.p1 if self.p1_score >= self.target_wins else self.p2
-            prize = round(self.bet * 2 * 0.95, 2)
-            embed = discord.Embed(
-                title="Dice Duel - Champion!",
-                description=(
-                    f"{score_bar}\n\n"
-                    f"**{winner.mention}** wins the duel with **{max(self.p1_score, self.p2_score)}** win(s)!\n"
-                    f"Prize: **+{prize:,.2f}** dices (1.90x)"
+            embed.add_field(
+                name="Table",
+                value=(
+                    f"`{self.bet:,.2f}` dices stake  |  `{self.bet*2:,.2f}` pot  |  {self._mode_label()}"
                 ),
-                color=0x0498fb,
+                inline=False,
             )
+            # 3-column scoreboard: P1 | VS | P2
+            embed.add_field(
+                name=p1_name,
+                value=f"{p1_dots}\n{p1_face}",
+                inline=True,
+            )
+            embed.add_field(
+                name="VS",
+                value="** **",
+                inline=True,
+            )
+            embed.add_field(
+                name=p2_name,
+                value=f"{p2_dots}\n{p2_face}",
+                inline=True,
+            )
+            if last_desc:
+                embed.add_field(name="\u200b", value=last_desc, inline=False)
+            embed.set_footer(text=f"First to {self.target_wins} wins takes the pot - 5% house edge")
+
+        else:
+            # ── FINISHED ──
+            winner = self.p1 if self.p1_score >= self.target_wins else self.p2
+            is_p1_win = (winner == self.p1)
+            embed = discord.Embed(color=0x33f667 if is_p1_win else 0x9945ff)
+            embed.set_author(
+                name="DICE DUELS - Game Over",
+                icon_url="https://i.imgur.com/jNKCFwO.png",
+            )
+            embed.add_field(
+                name=p1_name,
+                value=f"{p1_dots}\n{p1_face}",
+                inline=True,
+            )
+            embed.add_field(
+                name="VS",
+                value="** **",
+                inline=True,
+            )
+            embed.add_field(
+                name=p2_name,
+                value=f"{p2_dots}\n{p2_face}",
+                inline=True,
+            )
+            embed.add_field(
+                name="Winner",
+                value=(
+                    f"🏆 {winner.mention}\n"
+                    f"**+{prize:,.2f} dices** (1.90x)\n"
+                    f"> Score: **{p1_name} {self.p1_score} - {self.p2_score} {p2_name}**"
+                    + (f"\n\n{last_desc}" if last_desc else "")
+                ),
+                inline=False,
+            )
+            embed.set_footer(text="Settled - House Edge 5% - may numbers decide the winner..")
+
         return embed
 
     async def handle_cancel(self, interaction: discord.Interaction):
@@ -1553,16 +1635,16 @@ class DiceDuelView(discord.ui.View):
             self.p2_roll = p2_roll
             p2_file = self.get_dice_file(p2_roll)
 
-            # Evaluate round outcome
-            round_outcome = f"**{self.p1.display_name}** rolled a **{p1_roll}**\n**{self.p2.display_name}** rolled a **{p2_roll}**\n"
-            if p1_roll > p2_roll:
+            # Evaluate round outcome — in cursed mode the lowest roll wins
+            round_outcome = f"**{self.p1.display_name}** rolled **{p1_roll}**  |  **{self.p2.display_name}** rolled **{p2_roll}**\n"
+            if p1_roll == p2_roll:
+                round_outcome += f"🔁 Tie! Both rolled **{p1_roll}** - round replayed!"
+            elif (not self.cursed and p1_roll > p2_roll) or (self.cursed and p1_roll < p2_roll):
                 self.p1_score += 1
-                round_outcome += f"**{self.p1.display_name}** wins Round {self.round_num}!"
-            elif p2_roll > p1_roll:
-                self.p2_score += 1
-                round_outcome += f"**{self.p2.display_name}** wins Round {self.round_num}!"
+                round_outcome += f"🏅 **{self.p1.display_name}** wins Round {self.round_num}!"
             else:
-                round_outcome += f"Tie! Both rolled **{p1_roll}** - round replayed!"
+                self.p2_score += 1
+                round_outcome += f"🏅 **{self.p2.display_name}** wins Round {self.round_num}!"
 
             # Check if someone reached target_wins
             if self.p1_score >= self.target_wins or self.p2_score >= self.target_wins:
@@ -1635,10 +1717,11 @@ class DiceDuelView(discord.ui.View):
                 pass
 
 
-@bot.tree.command(name="diceduel", description="Challenge another player to a 2-player dice duel!")
+@bot.tree.command(name="diceduel", description="Challenge another player to a dice duel!")
 @app_commands.describe(
     amount="Bet amount in dices each player puts in",
     first_to="First to how many round wins? (1, 2, or 3)",
+    cursed="Cursed mode: lowest roll wins the pot instead of highest",
 )
 @app_commands.choices(first_to=[
     app_commands.Choice(name="First to 1 win", value=1),
@@ -1649,6 +1732,7 @@ async def diceduel(
     interaction: discord.Interaction,
     amount: float,
     first_to: int = 1,
+    cursed: bool = False,
 ):
     if amount <= 0:
         await interaction.response.send_message("Bet amount must be greater than 0.", ephemeral=True)
@@ -1671,6 +1755,7 @@ async def diceduel(
     start_active_game(interaction.user.id, "DiceDuel", amount)
 
     view = DiceDuelView(p1=interaction.user, bet=amount, target_wins=first_to)
+    view.cursed = cursed
     embed = view.build_embed()
     await interaction.response.send_message(embed=embed, view=view)
     view.message = await interaction.original_response()
